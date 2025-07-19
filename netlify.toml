@@ -1,6 +1,9 @@
-[build]
-  publish    = "."               # serve index.html from repo root
-  functions  = "netlify/functions"
+# netlify.toml
 
-[functions]
-  node_bundler = "esbuild"       # faster JS bundling
+[build]
+  publish = "."      # serve index.html and any static assets from repo root
+
+# Map the Edge Function "data" to the path /data
+[[edge_functions]]
+  path = "/data"
+  function = "data"
