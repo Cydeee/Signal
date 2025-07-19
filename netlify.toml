@@ -1,9 +1,6 @@
-# netlify.toml
-
 [build]
-  publish = "."      # serve index.html and any static assets from repo root
+  publish = "."
 
-# Map the Edge Function "data" to the path /data
 [[edge_functions]]
-  path = "/data"
-  function = "data"
+  path     = "/data.html"
+  function = "data-page"
