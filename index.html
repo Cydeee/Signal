@@ -146,26 +146,40 @@ async function pollD(){
 }
 pollD(); setInterval(pollD,POLLD);
 
-/* ─── Block E – Macro snapshot via Stooq CSV ─────────── */
-async function csv(sym){const t=await fetch(CORS(`https://stooq.com/q/d/l/?s=${sym}&i=d`)).then(r=>r.text());
-  return t.trim().split('\n').slice(1).map(l=>+l.split(',')[4]);}
-async function pollE(){
+/* ========== 7 · BLOCK E · Macro ========== */
+const AV = p => `https://www.alphavantage.co/query?${p}&apikey=${TOKEN_AV}`;
+async function pullE(){
   try{
-    const [qqq,dxy,vix,tip] = await Promise.all([csv('qqq.us'),csv('dx.f'),csv('vixy.us'),csv('tip.us')]);
-    const btc=await fetch(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=1d&limit=10`).then(r=>r.json()).then(r=>r.map(x=>+x[4]));
-    const tbl=document.querySelector('#tblE tbody');
+    const [qqq, btc, dxy, vix, tip] = await Promise.all([
+      fetch(AV('function=TIME_SERIES_INTRADAY&symbol=QQQ&interval=30min')).then(r=>r.json()),
+      fetch(AV('function=CRYPTO_INTRADAY&symbol=BTC/USD&interval=60min')).then(r=>r.json()),
+      fetch(AV('function=FX_DAILY&from_symbol=USD&to_symbol=DXY')).then(r=>r.json()),
+      fetch(AV('function=TIME_SERIES_DAILY&symbol=VIXY')).then(r=>r.json()),
+      fetch(AV('function=TIME_SERIES_DAILY&symbol=TIP')).then(r=>r.json())
+    ]);
+    const q30   = Object.values(qqq['Time Series (30min)']||{}).slice(0,2).map(o=>+o['4. close']);
+    const qPct  = q30.length===2?(((q30[0]-q30[1])/q30[1])*100).toFixed(2):null;
+    const btc60 = Object.values(btc['Time Series Crypto (60min)']||{}).slice(0,10).map(o=>+o['4. close']);
+    const qqq60 = Object.values(qqq['Time Series (30min)']||{}).slice(0,10).map(o=>+o['4. close']);
+    const corr  = (btc60.length===qqq60.length)?pearson(btc60,qqq60).toFixed(2):null;
+    /* DXY & VIXY z-score helper */
+    function zscore(series){const xs=Object.values(series).slice(0,30).map(o=>+o['4. close']);
+      const m=xs.reduce((a,b)=>a+b,0)/xs.length;
+      const sd=Math.sqrt(xs.reduce((s,x)=>s+(x-m)**2,0)/xs.length);
+      return ((xs[0]-m)/sd).toFixed(2);}
+    const dxyZ = zscore(dxy['Time Series FX (Daily)']||{});
+    const vixZ = zscore(vix['Time Series (Daily)']||{});
+    /* TIP 1-d %Δ */
+    const tipTwo=Object.values(tip['Time Series (Daily)']||{}).slice(0,2).map(o=>+o['4. close']);
+    const tipPct=tipTwo.length===2?(((tipTwo[0]-tipTwo[1])/tipTwo[1])*100).toFixed(2):null;
 
-    row(tbl,'QQQ 1-day %Δ',(((qqq[0]-qqq[1])/qqq[1]*100).toFixed(2)+' %'));
-    row(tbl,'BTC·QQQ ρ (10d)',pearson(btc,qqq.slice(0,10)).toFixed(2));
-    const z30=a=>{const m=sma(a.slice(0,30),30),s=std(a.slice(0,30),30);return ((a[0]-m)/s).toFixed(2);};
-    row(tbl,'DXY z-score', z30(dxy));
-    row(tbl,'VIXY z-score',z30(vix));
-    row(tbl,'TIP 1-day %Δ',(((tip[0]-tip[1])/tip[1]*100).toFixed(2)+' %'));
-
-  }catch(e){
-    console.error('E',e);
-    document.querySelector('#tblE tbody').innerHTML='<tr><td colspan="2" class="p-1">⚠️ fetch error</td></tr>';
-  }
+    const tbl=byId('tblE');
+    setCell(tbl,'QQQ 30 min %Δ', badge(qPct,' ↑',' ↓'));
+    setCell(tbl,'BTC-QQQ corr ρ',fmt(corr,2));
+    setCell(tbl,'DXY z-score', badge(dxyZ,' ↑',' ↓'));
+    setCell(tbl,'VIXY z-score', badge(vixZ,' ↑',' ↓'));
+    setCell(tbl,'TIP 1-day %Δ', badge(tipPct,' ↑',' ↓'));
+  }catch(e){ console.error('E',e);}
 }
 pollE(); setInterval(pollE,POLLE);
 
