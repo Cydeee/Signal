@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Dashboard Data</title></head>
+<body>
+  <pre id="dashboard-data"></pre>
+  <script>
+    fetch('/data')
+      .then(r => r.json())
+      .then(j => {
+        document.getElementById('dashboard-data').textContent = 
+          JSON.stringify(j, null, 2);
+      })
+      .catch(e => {
+        document.getElementById('dashboard-data').textContent = 
+          'Error: ' + e;
+      });
+  </script>
+</body>
+</html>
