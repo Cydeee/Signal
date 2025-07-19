@@ -10,11 +10,11 @@
 <body class="bg-slate-50 text-[13px] leading-5">
 <div class="max-w-6xl mx-auto p-4 space-y-10">
 
-  <h1 class="text-2xl font-bold">📊 Signal Blocks — BTCUSDT (Binance, key-free)</h1>
+  <h1 class="text-2xl font-bold">📊 Signal Blocks — BTCUSDT (key-free)</h1>
 
   <!-- ░ Block A ░ -->
   <section>
-    <h2 class="text-xl font-semibold">🟦 Block A · Price · Volatility · Trend</h2>
+    <h2 class="text-xl font-semibold">🟦 Block A · Price / Volatility / Trend</h2>
     <div id="cardsA" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mt-2"></div>
   </section>
 
@@ -38,7 +38,7 @@
 
   <!-- ░ Block D ░ -->
   <section>
-    <h2 class="text-xl font-semibold">🟪 Block D · Sentiment · Community</h2>
+    <h2 class="text-xl font-semibold">🟪 Block D · Sentiment / Community</h2>
     <table id="tblD" class="w-full text-left bg-white rounded shadow mt-2">
       <thead class="bg-slate-100"><tr><th class="p-1 w-52">Metric</th><th class="p-1">Value</th></tr></thead>
       <tbody></tbody>
@@ -49,20 +49,14 @@
 </div>
 
 <script>
-/* === CONFIG === */
-const SYMBOL  = 'BTCUSDT';
-const TF      = { '15 m':'15m','1 h':'1h','4 h':'4h','1 d':'1d' };
-const LIMIT   = 250;
-const CG_ID   = 'bitcoin';
-const POLL_A  = 60_000;
-const POLL_B  = 60_000;
-const POLL_C  = 60_000;
-const POLL_D  = 300_000;
-const cors    = u => `https://cors.isomorphic-git.org/${encodeURIComponent(u)}`;
-
-/* === math helpers === */
+/* ═════ CONFIG & HELPERS ═════ */
+const SYMBOL='BTCUSDT';
+const TF={'15 m':'15m','1 h':'1h','4 h':'4h','1 d':'1d'};
+const LIMIT=250;
+const CG_ID='bitcoin';
+const POLL_A=60_000, POLL_B=60_000, POLL_D=300_000;
 const sma=(a,p)=>a.slice(-p).reduce((s,x)=>s+x,0)/p;
-const std=(a,p)=>{const S=a.slice(-p),m=sma(S,p);return Math.sqrt(S.reduce((t,x)=>t+(x-m)**2,0)/p);};
+const std=(a,p)=>{const s=a.slice(-p),m=sma(s,p);return Math.sqrt(s.reduce((t,x)=>t+(x-m)**2,0)/p);};
 const ema=(a,p)=>{if(a.length<p)return null;const k=2/(p+1);let e=sma(a.slice(0,p),p);for(let i=p;i<a.length;i++)e=a[i]*k+e*(1-k);return e;};
 const rsi=(a,p)=>{if(a.length<p+1)return null;let g=0,l=0;for(let i=1;i<=p;i++){const d=a[i]-a[i-1];d>=0?g+=d:l-=d;}
   let ag=g/p,al=l/p;for(let i=p+1;i<a.length;i++){const d=a[i]-a[i-1];ag=(ag*(p-1)+(d>0?d:0))/p;al=(al*(p-1)+(d<0?-d:0))/p;}
@@ -70,46 +64,44 @@ const rsi=(a,p)=>{if(a.length<p+1)return null;let g=0,l=0;for(let i=1;i<=p;i++){
 const atr=(h,l,c,p)=>{if(h.length<p+1)return null;const tr=[];for(let i=1;i<h.length;i++)
   tr.push(Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])));return sma(tr.slice(-p),p);};
 const fmt=(v,p=2)=>v==null?'⚠️':(+v).toFixed(p);
-const z   = a => {const m=sma(a,a.length),s=std(a,a.length);return s?(a.at(-1)-m)/s:0;};
-function setRow(tbl,k,v,cls=''){let tr=tbl.querySelector(`tr[data-k="${k}"]`);
-  if(!tr){tr=document.createElement('tr');tr.dataset.k=k;tr.innerHTML=`<td class="p-1">${k}</td><td class="p-1" data-v></td>`;tbl.appendChild(tr);}
-  const td=tr.querySelector('[data-v]');td.textContent=v;td.className=`p-1 ${cls}`;}
+const z=a=>{const m=sma(a,a.length),s=std(a,a.length);return s?(a.at(-1)-m)/s:0;};
+function setRow(tbl,key,val,cls=''){let tr=tbl.querySelector(`tr[data-k="${key}"]`);
+  if(!tr){tr=document.createElement('tr');tr.dataset.k=key;tr.innerHTML=`<td class="p-1">${key}</td><td class="p-1" data-v></td>`;tbl.appendChild(tr);}
+  const td=tr.querySelector('[data-v]');td.textContent=val;td.className=`p-1 ${cls}`;}
 
-/* === build Block A cards === */
-const aWrap=document.getElementById('cardsA');
+/* ═════ Build Block A cards ═════ */
 for(const t in TF){
-  aWrap.insertAdjacentHTML('beforeend',`
+  document.getElementById('cardsA').insertAdjacentHTML('beforeend',`
     <div class="bg-white rounded shadow p-3 space-y-1">
       <h3 class="font-medium mb-1">${t}</h3>
-      <div>EMA-50       <span id="${t}-ema50">…</span></div>
-      <div>EMA-200      <span id="${t}-ema200">…</span></div>
-      <div>RSI-14       <span id="${t}-rsi">…</span></div>
-      <div>BB width %   <span id="${t}-bb">…</span></div>
-      <div>ATR/Close %  <span id="${t}-atr">…</span></div>
+      <div>EMA-50      <span id="${t}-ema50">…</span></div>
+      <div>EMA-200     <span id="${t}-ema200">…</span></div>
+      <div>RSI-14      <span id="${t}-rsi">…</span></div>
+      <div>BB width %  <span id="${t}-bb">…</span></div>
+      <div>ATR/Close % <span id="${t}-atr">…</span></div>
     </div>`);}
 
-/* === Block A === */
+/* ═════ Block A ═════ */
 async function pollA(){
   for(const [lbl,tf] of Object.entries(TF)){
     try{
       const rows=await fetch(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=${tf}&limit=${LIMIT}`).then(r=>r.json());
       const c=rows.map(r=>+r[4]),h=rows.map(r=>+r[2]),l=rows.map(r=>+r[3]),last=c.at(-1);
-      const out=[['ema50',ema(c,50)],['ema200',ema(c,200)],['rsi',rsi(c,14)],
-                 ['bb', std(c,20)?((4*std(c,20)/last)*100).toFixed(2):null],
-                 ['atr',atr(h,l,c,14)?((atr(h,l,c,14)/last)*100).toFixed(2):null]];
-      out.forEach(([k,v])=>document.getElementById(`${lbl}-${k}`).textContent=fmt(v,k==='rsi'?1:2));
+      [['ema50',ema(c,50)],['ema200',ema(c,200)],['rsi',rsi(c,14)],
+       ['bb',std(c,20)?((4*std(c,20)/last)*100).toFixed(2):null],
+       ['atr',atr(h,l,c,14)?((atr(h,l,c,14)/last)*100).toFixed(2):null]]
+      .forEach(([k,v])=>document.getElementById(`${lbl}-${k}`).textContent=fmt(v,k==='rsi'?1:2));
     }catch(e){console.error('A',lbl,e);}
   }
 }
 pollA(); setInterval(pollA,POLL_A);
 
-/* === Block B === */
+/* ═════ Block B ═════ */
 async function pollB(){
   try{
     const f=await fetch(`https://fapi.binance.com/fapi/v1/fundingRate?symbol=${SYMBOL}&limit=1000`).then(r=>r.json());
     const zVal=z(f.slice(-42).map(d=>+d.fundingRate)).toFixed(2);
-    setRow(document.querySelector('#tblB tbody'),'Funding z-score',zVal,
-           Math.abs(zVal)>=2?(zVal>0?'text-rose-600':'text-emerald-600'):'');
+    setRow(document.querySelector('#tblB tbody'),'Funding z-score',zVal,Math.abs(zVal)>=2?(zVal>0?'text-rose-600':'text-emerald-600'):'');
     const [oiNow,oiHist]=await Promise.all([
       fetch(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${SYMBOL}`).then(r=>r.json()),
       fetch(`https://fapi.binance.com/futures/data/openInterestHist?symbol=${SYMBOL}&period=1h&limit=24`).then(r=>r.json())
@@ -120,51 +112,59 @@ async function pollB(){
 }
 pollB(); setInterval(pollB,POLL_B);
 
-/* === Block C — REST-based buckets === */
-const C_BUCKET=60*60*1000, C_MAX=4, liq=[];
-function bucket(ts){const t=Math.floor(ts/C_BUCKET)*C_BUCKET;let b=liq.find(x=>x.t===t);
-  if(!b){b={t,long:0,short:0};liq.push(b);if(liq.length>C_MAX)liq.shift();}return b;}
-async function pullLiq(){
-  const rows=await fetch(`https://fapi.binance.com/fapi/v1/forceOrders?symbol=${SYMBOL}&limit=1000`).then(r=>r.json());
-  const cutoff=Date.now()-C_BUCKET*C_MAX;
-  liq.forEach(b=>{b.long=0;b.short=0;});
-  rows.forEach(e=>{
-    if(e.time<cutoff)return;
-    const val=+e.avgPrice*+e.origQty;
-    const b=bucket(e.time);
-    e.side==='SELL'?b.long+=val:b.short+=val;
-  });
+/* ═════ Block C — Bybit WebSocket ═════ */
+const C_BUCKET=60*60*1000, C_MAX=4, buckets=[];
+function curBucket(ts=Date.now()){
+  const t=Math.floor(ts/C_BUCKET)*C_BUCKET;
+  let b=buckets.find(x=>x.t===t);
+  if(!b){b={t,long:0,short:0};buckets.push(b);if(buckets.length>C_MAX)buckets.shift();}
+  return b;
 }
-function renderLiq(){
+function renderC(){
   const tb=document.querySelector('#tblC tbody');tb.innerHTML='';
-  liq.slice().reverse().forEach((b,i)=>tb.insertAdjacentHTML('beforeend',`
+  buckets.slice().reverse().forEach((b,i)=>tb.insertAdjacentHTML('beforeend',`
     <tr><td class="p-1">${i===0?'0-1 h':`${i}-${i+1} h`}</td>
         <td class="p-1 text-rose-600">${(b.long /1e6).toFixed(1)} M</td>
-        <td class="p-1 text-emerald-600">${(b.short/1e6).toFixed(1)} M</td></tr>`));}
-async function pollC(){try{await pullLiq();}catch(e){console.error('C',e);}renderLiq();}
-pollC(); setInterval(pollC,POLL_C);
+        <td class="p-1 text-emerald-600">${(b.short/1e6).toFixed(1)} M</td></tr>`));
+}
+(function connectC(){
+  const ws=new WebSocket('wss://stream.bybit.com/v5/public/linear');
+  ws.addEventListener('open',()=>ws.send(JSON.stringify({op:'subscribe',args:[`allLiquidation.${SYMBOL}`]})));
+  ws.addEventListener('message',ev=>{
+    const msg=JSON.parse(ev.data);
+    if(msg.topic&&msg.data){
+      msg.data.forEach(ev=>{
+        const val=+ev.price*+ev.qty;
+        const b=curBucket(ev.T);
+        ev.S==='Sell'?b.long+=val:b.short+=val;
+      });
+      renderC();
+    }
+  });
+  ws.addEventListener('close',()=>setTimeout(connectC,2000));
+})();
+renderC();                    // initial zeros
 
-/* === Block D === */
+/* ═════ Block D ═════ */
 async function pollD(){
   try{
     const cg=await fetch(`https://api.coingecko.com/api/v3/coins/${CG_ID}`).then(r=>r.json());
     let red='⚠️';
     try{
       const end=Math.floor(Date.now()/1000),start=end-172800;
-      const j=await fetch(cors(`https://api.pushshift.io/reddit/search/submission/?q=${CG_ID}&after=${start}&before=${end}&size=0&metadata=true`)).then(r=>r.json());
+      const j=await fetch(`https://api.pushshift.io/reddit/search/submission/?q=${CG_ID}&after=${start}&before=${end}&size=0&metadata=true`).then(r=>r.json());
       red=j.metadata?.total_results ?? '⚠️';
     }catch{}
     const tb=document.querySelector('#tblD tbody');
     setRow(tb,'Sentiment votes %',cg.sentiment_votes_up_percentage?.toFixed(1) ?? '⚠️');
-    setRow(tb,'Community score',  cg.community_score?.toFixed(1) ?? '⚠️');
-    setRow(tb,'Reddit posts 48 h',String(red));
+    setRow(tb,'Community score',   cg.community_score?.toFixed(1) ?? '⚠️');
+    setRow(tb,'Reddit posts 48 h', String(red));
   }catch(e){console.error('D',e);}
 }
 pollD(); setInterval(pollD,POLL_D);
 
-/* === status clock === */
-setInterval(()=>document.getElementById('status').textContent=
-  'Last refresh '+new Date().toLocaleTimeString(),1000);
+/* ═════ live clock ═════ */
+setInterval(()=>document.getElementById('status').textContent='Last refresh '+new Date().toLocaleTimeString(),1000);
 </script>
 </body>
 </html>
