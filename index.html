@@ -12,180 +12,196 @@
   <h1 class="text-2xl font-bold">📊 Signal Blocks — BTCUSDT (key-free)</h1>
 
   <!-- A -->
-  <section><h2 class="text-xl font-semibold">🟦 Block A · Price / Volatility / Trend</h2>
-    <div id="cardsA" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mt-2"></div></section>
+  <section>
+    <h2 class="text-xl font-semibold">🟦 Block A · Price / Volatility / Trend</h2>
+    <div id="cardsA" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mt-2"></div>
+  </section>
 
   <!-- B -->
-  <section><h2 class="text-xl font-semibold">🟨 Block B · Derivatives Positioning</h2>
+  <section>
+    <h2 class="text-xl font-semibold">🟨 Block B · Derivatives Positioning</h2>
     <table id="tblB" class="w-full text-left bg-white rounded shadow mt-2">
-      <thead class="bg-slate-100"><tr><th class="p-1 w-52">Metric</th><th class="p-1">Value</th></tr></thead><tbody></tbody></table></section>
+      <thead class="bg-slate-100">
+        <tr><th class="p-1 w-52">Metric</th><th class="p-1">Value</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
 
-  <!-- C -->
-  <section><h2 class="text-xl font-semibold">🟥 Block C · Latest Bybit Liquidations (≤200)</h2>
-    <table id="tblC" class="w-full text-left bg-white rounded shadow mt-2">
-      <thead class="bg-slate-100"><tr><th class="p-1">Long $</th><th class="p-1">Short $</th></tr></thead><tbody></tbody></table></section>
+  <!-- C (removed) -->
+  <section>
+    <h2 class="text-xl font-semibold">🟥 Block C · Liquidations</h2>
+    <div class="bg-white rounded shadow p-3 mt-2 text-gray-600 italic">
+      [Work in progress]
+    </div>
+  </section>
 
   <!-- D -->
-  <section><h2 class="text-xl font-semibold">🟪 Block D · Sentiment</h2>
+  <section>
+    <h2 class="text-xl font-semibold">🟪 Block D · Sentiment</h2>
     <table id="tblD" class="w-full text-left bg-white rounded shadow mt-2">
-      <thead class="bg-slate-100"><tr><th class="p-1 w-56">Metric</th><th class="p-1">Value</th></tr></thead><tbody></tbody></table></section>
+      <thead class="bg-slate-100">
+        <tr><th class="p-1 w-56">Metric</th><th class="p-1">Value</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
 
   <!-- E -->
-  <section><h2 class="text-xl font-semibold">🟫 Block E · Macro Risk Context</h2>
+  <section>
+    <h2 class="text-xl font-semibold">🟫 Block E · Macro Risk Context</h2>
     <table id="tblE" class="w-full text-left bg-white rounded shadow mt-2">
-      <thead class="bg-slate-100"><tr><th class="p-1 w-56">Metric</th><th class="p-1">Value</th></tr></thead><tbody></tbody></table></section>
+      <thead class="bg-slate-100">
+        <tr><th class="p-1">Metric</th><th class="p-1">Value</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
 
   <p id="status" class="text-gray-500"></p>
 </div>
 
 <script>
 /* ─── CONFIG ───────────────────────────────────────────── */
-const SYMBOL='BTCUSDT';
-const TF={'15 m':'15m','1 h':'1h','4 h':'4h','1 d':'1d'};
-const LIMIT=250;
-const POLLA=60_000,POLLB=60_000,POLLC=60_000,POLLD=300_000,POLLE=300_000;
-const CORS=u=>`https://cors.isomorphic-git.org/${encodeURIComponent(u)}`;
+const SYMBOL = 'BTCUSDT';
+const CG_ID   = 'bitcoin';
+const LIMIT   = 250;
+const TF      = { '15m':'15 m', '1h':'1 h', '4h':'4 h', '1d':'1 d' };
+const CADENCE = { A:60000, B:60000, D:300000, E:300000 };
 
-/* ─── helpers ──────────────────────────────────────────── */
+/* ─── HELPERS ──────────────────────────────────────────── */
+const byId = id => document.getElementById(id);
+const fmt  = (x,p=2) => x==null ? '⚠️' : (+x).toFixed(p);
+function setCell(tbl,key,val){
+  let tr = tbl.querySelector(`tr[data-k="${key}"]`);
+  if(!tr){
+    tr = document.createElement('tr');
+    tr.dataset.k = key;
+    tr.innerHTML = `<td class="p-1">${key}</td><td class="p-1" data-v></td>`;
+    tbl.querySelector('tbody').appendChild(tr);
+  }
+  tr.querySelector('[data-v]').textContent = val;
+}
+function row(tbl,k,v,cls=''){
+  let tr = tbl.querySelector(`tr[data-k="${k}"]`);
+  if(!tr){
+    tr=document.createElement('tr');
+    tr.dataset.k=k;
+    tr.innerHTML=`<td class="p-1">${k}</td><td class="p-1" data-v></td>`;
+    tbl.querySelector('tbody').appendChild(tr);
+  }
+  const td=tr.querySelector('[data-v]');
+  td.textContent=v;
+  td.className=`p-1 ${cls}`;
+}
+
+/* ─── BLOCK A ─────────────────────────────────────────── */
+// build cards
+const wrapA = byId('cardsA');
+for(const intv in TF){
+  wrapA.insertAdjacentHTML('beforeend',`
+    <div class="bg-white rounded shadow p-3 space-y-1">
+      <h3 class="font-medium">${TF[intv]}</h3>
+      <div>EMA-50       <span id="${intv}-ema50">…</span></div>
+      <div>EMA-200      <span id="${intv}-ema200">…</span></div>
+      <div>RSI-14       <span id="${intv}-rsi">…</span></div>
+      <div>BB width %   <span id="${intv}-bb">…</span></div>
+      <div>ATR/Close %  <span id="${intv}-atr">…</span></div>
+    </div>`);
+}
+// math
 const sma=(a,p)=>a.slice(-p).reduce((s,x)=>s+x,0)/p;
 const std=(a,p)=>{const s=a.slice(-p),m=sma(s,p);return Math.sqrt(s.reduce((t,x)=>t+(x-m)**2,0)/p);};
-const ema=(a,p)=>{if(a.length<p)return null;const k=2/(p+1);let e=sma(a.slice(0,p),p);for(let i=p;i<a.length;i++)e=a[i]*k+e*(1-k);return e;};
+const ema=(a,p)=>{if(a.length<p)return null;const k=2/(p+1);let e=sma(a.slice(0,p),p);
+  for(let i=p;i<a.length;i++)e=a[i]*k+e*(1-k);return e;};
 const rsi=(a,p)=>{if(a.length<p+1)return null;let g=0,l=0;
   for(let i=1;i<=p;i++){const d=a[i]-a[i-1];d>=0?g+=d:l-=d;}
-  let ag=g/p,al=l/p;for(let i=p+1;i<a.length;i++){const d=a[i]-a[i-1];
-    ag=(ag*(p-1)+(d>0?d:0))/p;al=(al*(p-1)+(d<0?-d:0))/p;}
-  return al===0?100:100-100/(1+ag/al);};
+  let ag=g/p,al=l/p;
+  for(let i=p+1;i<a.length;i++){const d=a[i]-a[i-1];
+    ag=(ag*(p-1)+(d>0?d:0))/p;
+    al=(al*(p-1)+(d<0?-d:0))/p;}
+  return al===0?100:100-100/(1+ag/al);
+};
 const atr=(h,l,c,p)=>{if(h.length<p+1)return null;const tr=[];
-  for(let i=1;i<h.length;i++)tr.push(Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])));
-  return sma(tr.slice(-p),p);};
-const z=(a)=>{const m=sma(a,a.length),s=std(a,a.length);return s?(a.at(-1)-m)/s:0;};
-const pearson=(x,y)=>{const n=x.length,mx=sma(x,n),my=sma(y,n);let num=0,dx=0,dy=0;
-  for(let i=0;i<n;i++){const a=x[i]-mx,b=y[i]-my;num+=a*b;dx+=a*a;dy+=b*b;}return num/Math.sqrt(dx*dy)||0;};
-const fmt=(v,p=2)=>v==null?'⚠️':(+v).toFixed(p);
-function row(tbl,k,v,cls=''){let tr=tbl.querySelector(`tr[data-k="${k}"]`);
-  if(!tr){tr=document.createElement('tr');tr.dataset.k=k;tr.innerHTML=`<td class="p-1">${k}</td><td class="p-1" data-v></td>`;tbl.appendChild(tr);}
-  const td=tr.querySelector('[data-v]');td.textContent=v;td.className=`p-1 ${cls}`;}
-
-/* ─── Build Block A cards ─────────────────────────────── */
-for(const t in TF){
-  document.getElementById('cardsA').insertAdjacentHTML('beforeend',`
-    <div class="bg-white rounded shadow p-3 space-y-1">
-      <h3 class="font-medium mb-1">${t}</h3>
-      <div>EMA-50      <span id="${t}-ema50">…</span></div>
-      <div>EMA-200     <span id="${t}-ema200">…</span></div>
-      <div>RSI-14      <span id="${t}-rsi">…</span></div>
-      <div>BB width %  <span id="${t}-bb">…</span></div>
-      <div>ATR/Close % <span id="${t}-atr">…</span></div>
-    </div>`);}
-
-/* ─── Block A ─────────────────────────────────────────── */
+  for(let i=1;i<h.length;i++)tr.push(
+    Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1]))
+  );
+  return sma(tr.slice(-p),p);
+};
 async function pollA(){
-  for(const [lbl,tf] of Object.entries(TF)){
+  for(const intv of Object.keys(TF)){
     try{
-      const rows=await fetch(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=${tf}&limit=${LIMIT}`).then(r=>r.json());
-      const c=rows.map(r=>+r[4]),h=rows.map(r=>+r[2]),l=rows.map(r=>+r[3]),last=c.at(-1);
-      [['ema50',ema(c,50)],['ema200',ema(c,200)],['rsi',rsi(c,14)],
-       ['bb',std(c,20)?((4*std(c,20)/last)*100).toFixed(2):null],
-       ['atr',atr(h,l,c,14)?((atr(h,l,c,14)/last)*100).toFixed(2):null]]
-      .forEach(([k,v])=>document.getElementById(`${lbl}-${k}`).textContent=fmt(v,k==='rsi'?1:2));
-    }catch(e){console.error('A',lbl,e);}
+      const rows = await fetch(
+        `https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=${intv}&limit=${LIMIT}`
+      ).then(r=>r.json());
+      const c = rows.map(r=>+r[4]), h = rows.map(r=>+r[2]), l = rows.map(r=>+r[3]), last=c.at(-1);
+      byId(`${intv}-ema50`).textContent  = fmt(ema(c,50));
+      byId(`${intv}-ema200`).textContent = fmt(ema(c,200));
+      byId(`${intv}-rsi`).textContent    = fmt(rsi(c,14),1);
+      byId(`${intv}-bb`).textContent     = fmt(std(c,20)?((4*std(c,20)/last)*100):null);
+      byId(`${intv}-atr`).textContent    = fmt(atr(h,l,c,14)?((atr(h,l,c,14)/last)*100):null);
+    }catch(e){console.error('A',intv,e);}
   }
 }
-pollA(); setInterval(pollA,POLLA);
+pollA(); setInterval(pollA,CADENCE.A);
 
-/* ─── Block B ─────────────────────────────────────────── */
+/* ─── BLOCK B ─────────────────────────────────────────── */
 async function pollB(){
+  const tbl = byId('tblB');
   try{
-    const f=await fetch(`https://fapi.binance.com/fapi/v1/fundingRate?symbol=${SYMBOL}&limit=1000`).then(r=>r.json());
-    const zVal=z(f.slice(-42).map(d=>+d.fundingRate)).toFixed(2);
-    const tbl=document.querySelector('#tblB tbody');
-    row(tbl,'Funding z-score',zVal,Math.abs(zVal)>=2?(zVal>0?'text-rose-600':'text-emerald-600'):'');
+    const fr = await fetch(
+      `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${SYMBOL}&limit=1000`
+    ).then(r=>r.json());
+    const arr=fr.slice(-42).map(d=>+d.fundingRate),
+          m  =arr.reduce((s,x)=>s+x,0)/arr.length,
+          sd =Math.sqrt(arr.reduce((t,x)=>t+(x-m)**2,0)/arr.length),
+          z  =sd?((arr.at(-1)-m)/sd).toFixed(2):'0.00';
+    setCell(tbl,'Funding z-score', z);
     const [oiNow,oiHist]=await Promise.all([
       fetch(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${SYMBOL}`).then(r=>r.json()),
       fetch(`https://fapi.binance.com/futures/data/openInterestHist?symbol=${SYMBOL}&period=1h&limit=24`).then(r=>r.json())
     ]);
-    const pct=((+oiNow.openInterest-+oiHist[0].sumOpenInterest)/+oiHist[0].sumOpenInterest*100).toFixed(1);
-    row(tbl,'OI %Δ (24 h)',pct+' %',pct>0?'text-emerald-600':'text-rose-600');
+    const pct = (((+oiNow.openInterest - +oiHist[0].sumOpenInterest)
+                 /+oiHist[0].sumOpenInterest)*100).toFixed(1);
+    setCell(tbl,'OI %Δ (24 h)', `${pct} %`);
   }catch(e){console.error('B',e);}
 }
-pollB(); setInterval(pollB,POLLB);
+pollB(); setInterval(pollB,CADENCE.B);
 
-/* ─── Block C – Bybit REST snapshot ───────────────────── */
-async function pollC(){
+/* ─── BLOCK C (placeholder) ───────────────────────────── */
+ // nothing to run; static “[Work in progress]” display
+
+/* ─── BLOCK D ─────────────────────────────────────────── */
+async function pollCmnt(){
+  const tbl = byId('tblC');
   try{
-    const url=CORS('https://api.bybit.com/v5/market/liquidation?category=linear&symbol=BTCUSDT&limit=200');
-    const {result}=await fetch(url).then(r=>r.json());        // result.list = [{side,size,price},…]
-    let longN=0,shortN=0;
-    (result.list||[]).forEach(o=>{
-      const usd=+o.size*+o.price;
-      o.side==='Sell'?longN+=usd:shortN+=usd;                 // Bybit side: Sell = longs liquidated
-    });
-    document.querySelector('#tblC tbody').innerHTML=`
-      <tr><td class="p-1 text-rose-600">${(longN /1e6).toFixed(1)} M</td>
-          <td class="p-1 text-emerald-600">${(shortN/1e6).toFixed(1)} M</td></tr>`;
-  }catch(e){
-    console.error('C',e);
-    document.querySelector('#tblC tbody').innerHTML='<tr><td colspan="2" class="p-1">⚠️ fetch error</td></tr>';
-  }
+    const cg = await fetch(`https://api.coingecko.com/api/v3/coins/${CG_ID}`)
+                  .then(r=>r.json());
+    setCell(tbl,'Sentiment votes %', fmt(cg.sentiment_votes_up_percentage,1));
+    setCell(tbl,'Community score',  fmt(cg.community_score,1));
+    setCell(tbl,'Reddit posts 48 h', cg.community_data.reddit_posts_48h ?? '⚠️');
+  }catch(e){console.error('D',e);}
 }
-pollC(); setInterval(pollC,POLLC);
+pollCmnt(); setInterval(pollCmnt,CADENCE.D);
 
-/* ─── Block D – sentiment only ───────────────────────── */
-async function pollD(){
-  const tb=document.querySelector('#tblD tbody');
-  let sent='⚠️'; try{
-    const cg=await fetch('https://api.coingecko.com/api/v3/coins/bitcoin').then(r=>r.json());
-    sent=cg.sentiment_votes_up_percentage?.toFixed(1) ?? '⚠️';
-  }catch(e){console.error('CG',e);}
-  let fgVal='⚠️',fgLbl='n/a'; try{
-    const fg=await fetch('https://api.alternative.me/fng/?limit=1').then(r=>r.json());
-    fgVal=fg.data[0].value; fgLbl=fg.data[0].value_classification;
-  }catch(e){console.error('FNG',e);}
-  row(tb,'Sentiment votes %',sent);
-  row(tb,'Fear & Greed',`${fgVal} · ${fgLbl}`);
-}
-pollD(); setInterval(pollD,POLLD);
-
-/* ========== 7 · BLOCK E · Macro ========== */
-const AV = p => `https://www.alphavantage.co/query?${p}&apikey=${TOKEN_AV}`;
-async function pullE(){
+/* ─── BLOCK E (Coingecko global) ──────────────────────── */
+async function pollE(){
+  const tbl = byId('tblE');
   try{
-    const [qqq, btc, dxy, vix, tip] = await Promise.all([
-      fetch(AV('function=TIME_SERIES_INTRADAY&symbol=QQQ&interval=30min')).then(r=>r.json()),
-      fetch(AV('function=CRYPTO_INTRADAY&symbol=BTC/USD&interval=60min')).then(r=>r.json()),
-      fetch(AV('function=FX_DAILY&from_symbol=USD&to_symbol=DXY')).then(r=>r.json()),
-      fetch(AV('function=TIME_SERIES_DAILY&symbol=VIXY')).then(r=>r.json()),
-      fetch(AV('function=TIME_SERIES_DAILY&symbol=TIP')).then(r=>r.json())
-    ]);
-    const q30   = Object.values(qqq['Time Series (30min)']||{}).slice(0,2).map(o=>+o['4. close']);
-    const qPct  = q30.length===2?(((q30[0]-q30[1])/q30[1])*100).toFixed(2):null;
-    const btc60 = Object.values(btc['Time Series Crypto (60min)']||{}).slice(0,10).map(o=>+o['4. close']);
-    const qqq60 = Object.values(qqq['Time Series (30min)']||{}).slice(0,10).map(o=>+o['4. close']);
-    const corr  = (btc60.length===qqq60.length)?pearson(btc60,qqq60).toFixed(2):null;
-    /* DXY & VIXY z-score helper */
-    function zscore(series){const xs=Object.values(series).slice(0,30).map(o=>+o['4. close']);
-      const m=xs.reduce((a,b)=>a+b,0)/xs.length;
-      const sd=Math.sqrt(xs.reduce((s,x)=>s+(x-m)**2,0)/xs.length);
-      return ((xs[0]-m)/sd).toFixed(2);}
-    const dxyZ = zscore(dxy['Time Series FX (Daily)']||{});
-    const vixZ = zscore(vix['Time Series (Daily)']||{});
-    /* TIP 1-d %Δ */
-    const tipTwo=Object.values(tip['Time Series (Daily)']||{}).slice(0,2).map(o=>+o['4. close']);
-    const tipPct=tipTwo.length===2?(((tipTwo[0]-tipTwo[1])/tipTwo[1])*100).toFixed(2):null;
-
-    const tbl=byId('tblE');
-    setCell(tbl,'QQQ 30 min %Δ', badge(qPct,' ↑',' ↓'));
-    setCell(tbl,'BTC-QQQ corr ρ',fmt(corr,2));
-    setCell(tbl,'DXY z-score', badge(dxyZ,' ↑',' ↓'));
-    setCell(tbl,'VIXY z-score', badge(vixZ,' ↑',' ↓'));
-    setCell(tbl,'TIP 1-day %Δ', badge(tipPct,' ↑',' ↓'));
-  }catch(e){ console.error('E',e);}
+    const g = await fetch('https://api.coingecko.com/api/v3/global')
+                    .then(r=>r.json()).then(j=>j.data);
+    setCell(tbl,'Total Market Cap (USD T)', `$${(g.total_market_cap.usd/1e12).toFixed(2)}`);
+    setCell(tbl,'24 h MCap Δ %',          `${g.market_cap_change_percentage_24h_usd.toFixed(2)} %`);
+    setCell(tbl,'BTC Dominance %',        `${g.market_cap_percentage.btc.toFixed(2)} %`);
+    setCell(tbl,'ETH Dominance %',        `${g.market_cap_percentage.eth.toFixed(2)} %`);
+  }catch(e){console.error('E',e);}
 }
-pollE(); setInterval(pollE,POLLE);
+pollE(); setInterval(pollE,CADENCE.E);
 
-/* ─── live clock ─────────────────────────────────────── */
-setInterval(()=>document.getElementById('status').textContent=
-  'Last refresh '+new Date().toLocaleTimeString(),1000);
+/* ─── status clock ───────────────────────────────────── */
+setInterval(()=>{
+  byId('status').textContent = 'Last refresh '+new Date().toLocaleTimeString();
+},1000);
 </script>
 </body>
 </html>
