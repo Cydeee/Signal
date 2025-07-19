@@ -28,7 +28,7 @@
 
   <!-- Block C -->
   <section>
-    <h2 class="text-xl font-semibold">🟥 Block C · Latest 5000 Bitfinex Liquidations</h2>
+    <h2 class="text-xl font-semibold">🟥 Block C · Latest 5 000 Bitfinex Liquidations</h2>
     <table id="tblC" class="w-full text-left bg-white rounded shadow mt-2">
       <thead class="bg-slate-100"><tr><th class="p-1">Long $</th><th class="p-1">Short $</th></tr></thead>
       <tbody></tbody>
@@ -57,16 +57,15 @@
 </div>
 
 <script>
-/* ═════ CONFIG ═════ */
+/* ─── 0 · CONFIG & HELPERS ───────────────────────────────────── */
 const SYMBOL='BTCUSDT';
 const TF={'15 m':'15m','1 h':'1h','4 h':'4h','1 d':'1d'};
 const LIMIT=250;
-const POLL_A=60_000, POLL_B=60_000, POLL_C=60_000, POLL_D=300_000, POLL_E=300_000;
-const cors=u=>`https://cors.isomorphic-git.org/${encodeURIComponent(u)}`;
+const POLLA=60_000,POLLB=60_000,POLLC=60_000,POLLD=300_000,POLLE=300_000;
+const proxy=u=>`https://cors.isomorphic-git.org/${encodeURIComponent(u)}`;
 
-/* ═════ HELPERS ═════ */
 const sma=(a,p)=>a.slice(-p).reduce((s,x)=>s+x,0)/p;
-const std=(a,p)=>{const S=a.slice(-p),m=sma(S,p);return Math.sqrt(S.reduce((t,x)=>t+(x-m)**2,0)/p);};
+const std=(a,p)=>{const s=a.slice(-p),m=sma(s,p);return Math.sqrt(s.reduce((t,x)=>t+(x-m)**2,0)/p);};
 const ema=(a,p)=>{if(a.length<p)return null;const k=2/(p+1);let e=sma(a.slice(0,p),p);for(let i=p;i<a.length;i++)e=a[i]*k+e*(1-k);return e;};
 const rsi=(a,p)=>{if(a.length<p+1)return null;let g=0,l=0;for(let i=1;i<=p;i++){const d=a[i]-a[i-1];d>=0?g+=d:l-=d;}
   let ag=g/p,al=l/p;for(let i=p+1;i<a.length;i++){const d=a[i]-a[i-1];ag=(ag*(p-1)+(d>0?d:0))/p;al=(al*(p-1)+(d<0?-d:0))/p;}
@@ -77,11 +76,11 @@ const z=a=>{const m=sma(a,a.length),s=std(a,a.length);return s?(a.at(-1)-m)/s:0;
 const pearson=(x,y)=>{const n=x.length,mx=sma(x,n),my=sma(y,n);
   let num=0,dx=0,dy=0;for(let i=0;i<n;i++){const a=x[i]-mx,b=y[i]-my;num+=a*b;dx+=a*a;dy+=b*b;}return num/Math.sqrt(dx*dy)||0;};
 const fmt=(v,p=2)=>v==null?'⚠️':(+v).toFixed(p);
-function setRow(tbl,k,v,cls=''){let tr=tbl.querySelector(`tr[data-k="${k}"]`);
+function row(tbl,k,v,cls=''){let tr=tbl.querySelector(`tr[data-k="${k}"]`);
   if(!tr){tr=document.createElement('tr');tr.dataset.k=k;tr.innerHTML=`<td class="p-1">${k}</td><td class="p-1" data-v></td>`;tbl.appendChild(tr);}
   const td=tr.querySelector('[data-v]');td.textContent=v;td.className=`p-1 ${cls}`;}
 
-/* ═════ Build Block A cards ═════ */
+/* ─── 1 · Build Block A cards ───────────────────────────────── */
 for(const t in TF){
   document.getElementById('cardsA').insertAdjacentHTML('beforeend',`
     <div class="bg-white rounded shadow p-3 space-y-1">
@@ -93,7 +92,7 @@ for(const t in TF){
       <div>ATR/Close % <span id="${t}-atr">…</span></div>
     </div>`);}
 
-/* ═════ Block A polling ═════ */
+/* ─── 2 · Block A polling ──────────────────────────────────── */
 async function pollA(){
   for(const [lbl,tf] of Object.entries(TF)){
     try{
@@ -106,30 +105,30 @@ async function pollA(){
     }catch(e){console.error('A',lbl,e);}
   }
 }
-pollA(); setInterval(pollA,POLL_A);
+pollA(); setInterval(pollA,POLLA);
 
-/* ═════ Block B polling ═════ */
+/* ─── 3 · Block B polling (no change) ──────────────────────── */
 async function pollB(){
   try{
     const f=await fetch(`https://fapi.binance.com/fapi/v1/fundingRate?symbol=${SYMBOL}&limit=1000`).then(r=>r.json());
     const zVal=z(f.slice(-42).map(d=>+d.fundingRate)).toFixed(2);
     const tbl=document.querySelector('#tblB tbody');
-    setRow(tbl,'Funding z-score',zVal,Math.abs(zVal)>=2?(zVal>0?'text-rose-600':'text-emerald-600'):'');
+    row(tbl,'Funding z-score',zVal,Math.abs(zVal)>=2?(zVal>0?'text-rose-600':'text-emerald-600'):'');
     const [oiNow,oiHist]=await Promise.all([
       fetch(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${SYMBOL}`).then(r=>r.json()),
       fetch(`https://fapi.binance.com/futures/data/openInterestHist?symbol=${SYMBOL}&period=1h&limit=24`).then(r=>r.json())
     ]);
     const pct=((+oiNow.openInterest-+oiHist[0].sumOpenInterest)/+oiHist[0].sumOpenInterest*100).toFixed(1);
-    setRow(tbl,'OI %Δ (24 h)',pct+' %',pct>0?'text-emerald-600':'text-rose-600');
+    row(tbl,'OI %Δ (24 h)',pct+' %',pct>0?'text-emerald-600':'text-rose-600');
   }catch(e){console.error('B',e);}
 }
-pollB(); setInterval(pollB,POLL_B);
+pollB(); setInterval(pollB,POLLB);
 
-/* ═════ Block C – Bitfinex latest 5000 liquidations ═════ */
+/* ─── 4 · Block C – 5000 Bitfinex liquidations (CORS-proxied) ─ */
 async function pollC(){
   try{
-    const url='https://api-pub.bitfinex.com/v2/liquidations/hist?symbol=tBTCUSD&limit=5000';
-    const rows=await fetch(url).then(r=>r.json());
+    const url=proxy('https://api-pub.bitfinex.com/v2/liquidations/hist?symbol=tBTCUSD&limit=5000');
+    const rows=await fetch(url).then(r=>r.json());          // [ID, MTS, ... , AMOUNT, BASE_PX , LIQ_PX?]
     let longN=0, shortN=0;
     rows.forEach(r=>{
       const amt=+r[5], px=+r[11]||+r[6];
@@ -147,57 +146,52 @@ async function pollC(){
       '<tr><td colspan="2" class="p-1">⚠️ fetch error</td></tr>';
   }
 }
-pollC(); setInterval(pollC,POLL_C);
+pollC(); setInterval(pollC,POLLC);
 
-/* ═════ Block D – Sentiment ═════ */
+/* ─── 5 · Block D – sentiment only ─────────────────────────── */
 async function pollD(){
   const tb=document.querySelector('#tblD tbody');
-  let sent='⚠️'; try{
+  let sent='⚠️';
+  try{
     const cg=await fetch('https://api.coingecko.com/api/v3/coins/bitcoin').then(r=>r.json());
     sent=cg.sentiment_votes_up_percentage?.toFixed(1) ?? '⚠️';
   }catch(e){console.error('CG',e);}
-  let fgVal='⚠️', fgLbl='n/a'; try{
+  let fgVal='⚠️', fgLbl='n/a';
+  try{
     const fg=await fetch('https://api.alternative.me/fng/?limit=1').then(r=>r.json());
     fgVal=fg.data[0].value; fgLbl=fg.data[0].value_classification;
   }catch(e){console.error('FNG',e);}
-  setRow(tb,'Sentiment votes %', sent);
-  setRow(tb,'Fear & Greed',     `${fgVal} · ${fgLbl}`);
+  row(tb,'Sentiment votes %', sent);
+  row(tb,'Fear & Greed',      `${fgVal} · ${fgLbl}`);
 }
-pollD(); setInterval(pollD,POLL_D);
+pollD(); setInterval(pollD,POLLD);
 
-/* ═════ Block E – Macro (Stooq CSV) ═════ */
-async function stooq(sym,days){
-  const txt=await fetch(cors(`https://stooq.com/q/d/l/?s=${sym}&i=d`)).then(r=>r.text());
-  return txt.trim().split('\n').slice(1,days+1).map(l=>+l.split(',')[4]);
+/* ─── 6 · Block E – Macro (direct Stooq) ────────────────────── */
+async function stooq(sym){
+  const txt=await fetch(`https://stooq.com/q/d/l/?s=${sym}&i=d`).then(r=>r.text());
+  return txt.trim().split('\n').slice(1).map(l=>+l.split(',')[4]);
 }
 async function pollE(){
   try{
-    const [qqq,dxy,vix,tip,btc] = await Promise.all([
-      stooq('qqq.us',    30),           // QQQ
-      stooq('dx.f',      30),           // DXY
-      stooq('vixy.us',   30),           // VIXY proxy
-      stooq('tip.us',     2),           // TIP 1-day move
-      fetch(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=1d&limit=10`)
-        .then(r=>r.json()).then(r=>r.map(x=>+x[4]))
+    const [qqq,dxy,vix,tip] = await Promise.all([
+      stooq('qqq.us'), stooq('dx.f'), stooq('vixy.us'), stooq('tip.us')
     ]);
+    const btc=await fetch(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=1d&limit=10`)
+      .then(r=>r.json()).then(r=>r.map(x=>+x[4]));
+
     const tbl=document.querySelector('#tblE tbody');
-
-    /* QQQ 1-day %Δ */
+    /* QQQ 1-day Δ */
     const qPct=((qqq[0]-qqq[1])/qqq[1]*100).toFixed(2);
-    setRow(tbl,'QQQ 1-day %Δ', qPct+' %');
-
-    /* BTC–QQQ corr (10 d) */
-    const corr=pearson(btc,qqq.slice(0,10)).toFixed(2);
-    setRow(tbl,'BTC·QQQ ρ (10 d)', corr);
-
-    /* DXY & VIXY z-scores (30 d) */
-    const z30=a=>{const m=sma(a,30),s=std(a,30);return ((a[0]-m)/s).toFixed(2);};
-    setRow(tbl,'DXY z-score',  z30(dxy));
-    setRow(tbl,'VIXY z-score', z30(vix));
-
-    /* TIP 1-day %Δ */
+    row(tbl,'QQQ 1-day %Δ', qPct+' %');
+    /* corr */
+    row(tbl,'BTC·QQQ ρ (10 d)', pearson(btc,qqq.slice(0,10)).toFixed(2));
+    /* z-scores */
+    const z30=a=>{const m=sma(a.slice(0,30),30),s=std(a.slice(0,30),30);return ((a[0]-m)/s).toFixed(2);};
+    row(tbl,'DXY z-score',  z30(dxy));
+    row(tbl,'VIXY z-score', z30(vix));
+    /* TIP 1-day Δ */
     const tipPct=((tip[0]-tip[1])/tip[1]*100).toFixed(2);
-    setRow(tbl,'TIP 1-day %Δ', tipPct+' %');
+    row(tbl,'TIP 1-day %Δ', tipPct+' %');
 
   }catch(e){
     console.error('E',e);
@@ -205,9 +199,9 @@ async function pollE(){
       '<tr><td colspan="2" class="p-1">⚠️ fetch error</td></tr>';
   }
 }
-pollE(); setInterval(pollE,POLL_E);
+pollE(); setInterval(pollE,POLLE);
 
-/* ═════ live clock ═════ */
+/* live clock */
 setInterval(()=>document.getElementById('status').textContent=
   'Last refresh '+new Date().toLocaleTimeString(),1000);
 </script>
