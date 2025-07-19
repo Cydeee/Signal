@@ -2,32 +2,47 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Block A — Binance-based Cryptotech</title>
+  <title>Signal Blocks – Crypto Swing-Trade Dashboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 
 <body class="bg-slate-50 text-[13px] leading-5">
-<div class="max-w-5xl mx-auto p-4 space-y-6">
+<div class="max-w-6xl mx-auto p-4 space-y-8">
 
-  <h1 class="text-2xl font-bold">🟦 Block A — Price · Volatility · Trend (Binance)</h1>
+  <!-- ───── Header ───── -->
+  <h1 class="text-2xl font-bold">📊 Signal Blocks — BTCUSDT (Binance)</h1>
 
-  <div id="cards" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"></div>
+  <!-- ───── Block A ───── -->
+  <section>
+    <h2 class="text-xl font-semibold">🟦 Block A – Price · Volatility · Trend</h2>
+    <div id="cardsA" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mt-2"></div>
+  </section>
+
+  <!-- ───── Block B ───── -->
+  <section id="blockB">
+    <h2 class="text-xl font-semibold mt-8">🟨 Block B – Derivatives Positioning</h2>
+    <table id="tblB" class="w-full text-left bg-white rounded shadow mt-2">
+      <thead class="bg-slate-100"><tr><th class="p-1 w-48">Metric</th><th class="p-1">Value</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
 
   <p id="status" class="text-gray-500"></p>
 </div>
 
 <script>
-/* ---------- 0 · CONFIG ---------- */
-const SYMBOL   = 'BTCUSDT';                          // Binance pair
-const TF_MAP   = { '15 m':'15m', '1 h':'1h', '4 h':'4h', '1 d':'1d' };
-const POLL_MS  = 60_000;                             // 60 s refresh
-const LIMIT    = 250;                                // enough for EMA-200
+/* ═══════════ 0 · CONFIG ═══════════ */
+const SYMBOL      = 'BTCUSDT';
+const TF_MAP      = { '15 m':'15m', '1 h':'1h', '4 h':'4h', '1 d':'1d' };
+const POLL_A_MS   = 60_000;                      // Block A refresh
+const POLL_B_MS   = 60_000;                      // Block B refresh
+const LIMIT_CAND  = 250;                         // >EMA-200
 
-/* ---------- 1 · BUILD CARDS ---------- */
-const wrap = document.getElementById('cards');
+/* ═══════════ 1 · BUILD Block A cards ═══════════ */
+const wrapA = document.getElementById('cardsA');
 Object.keys(TF_MAP).forEach(tf=>{
-  wrap.insertAdjacentHTML('beforeend',`
+  wrapA.insertAdjacentHTML('beforeend',`
     <div class="bg-white rounded shadow p-3 space-y-1">
       <h3 class="font-medium mb-1">${tf}</h3>
       <div>EMA-50       <span id="${tf}-ema50">…</span></div>
@@ -38,85 +53,110 @@ Object.keys(TF_MAP).forEach(tf=>{
     </div>`);
 });
 
-/* ---------- 2 · INDICATOR HELPERS ---------- */
-const sma = (arr,p)=>arr.slice(-p).reduce((a,b)=>a+b,0)/p;
-const ema = (arr,p)=>{
-  if(arr.length < p) return null;
-  const k=2/(p+1);
-  let e = sma(arr.slice(0,p),p);
-  for(let i=p;i<arr.length;i++) e = arr[i]*k + e*(1-k);
-  return e;
-};
-const std = (arr,p)=>{
-  const slice = arr.slice(-p);
-  const m = slice.reduce((a,b)=>a+b,0)/p;
-  return Math.sqrt(slice.reduce((s,x)=>s+(x-m)**2,0)/p);
-};
-const rsi = (arr,p)=>{
-  if(arr.length < p+1) return null;
-  let gains=0, losses=0;
-  for(let i=1;i<=p;i++){
-    const diff = arr[i]-arr[i-1];
-    diff>=0? gains+=diff : losses-=diff;
-  }
-  let avgG=gains/p, avgL=losses/p;
-  for(let i=p+1;i<arr.length;i++){
-    const diff = arr[i]-arr[i-1];
-    avgG = (avgG*(p-1)+(diff>0?diff:0))/p;
-    avgL = (avgL*(p-1)+(diff<0?-diff:0))/p;
-  }
-  return avgL===0?100:100-100/(1+avgG/avgL);
-};
-const atr = (highs,lows,closes,p)=>{
-  if(highs.length<p+1) return null;
-  const TRs = [];
-  for(let i=1;i<highs.length;i++){
-    const tr = Math.max(
-      highs[i]-lows[i],
-      Math.abs(highs[i]-closes[i-1]),
-      Math.abs(lows[i]-closes[i-1])
-    );
-    TRs.push(tr);
-  }
-  return sma(TRs.slice(-p),p);
-};
-const fmt = (v,p=2)=>v==null?'⚠️':(+v).toFixed(p);
+/* ═══════════ 2 · Math helpers ═══════════ */
+const sma  =(a,p)=>a.slice(-p).reduce((s,x)=>s+x,0)/p;
+const ema  =(a,p)=>{ if(a.length<p) return null; const k=2/(p+1);
+  let e=sma(a.slice(0,p),p); for(let i=p;i<a.length;i++) e=a[i]*k+e*(1-k); return e; };
+const std  =(a,p)=>{ const s=a.slice(-p); const m=sma(s,p);
+  return Math.sqrt(s.reduce((t,x)=>t+(x-m)**2,0)/p); };
+const rsi  =(a,p)=>{ if(a.length<p+1) return null;
+  let g=0,l=0; for(let i=1;i<=p;i++){ const d=a[i]-a[i-1]; d>=0?g+=d:l-=d; }
+  let ag=g/p, al=l/p; for(let i=p+1;i<a.length;i++){ const d=a[i]-a[i-1];
+    ag=(ag*(p-1)+(d>0?d:0))/p; al=(al*(p-1)+(d<0?-d:0))/p; }
+  return al===0?100:100-100/(1+ag/al); };
+const atr  =(h,l,c,p)=>{ if(h.length<p+1) return null;
+  const tr=[]; for(let i=1;i<h.length;i++){
+    tr.push(Math.max(h[i]-l[i], Math.abs(h[i]-c[i-1]), Math.abs(l[i]-c[i-1]))); }
+  return sma(tr.slice(-p),p); };
+const fmt  =(v,p=2)=>v==null?'⚠️':(+v).toFixed(p);
 
-/* ---------- 3 · FETCH + COMPUTE ---------- */
-async function fetchCloses(tf){
-  const url=`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=${tf}&limit=${LIMIT}`;
-  const rows = await fetch(url).then(r=>r.json());
-  const closes = rows.map(r=>+r[4]);
-  const highs  = rows.map(r=>+r[2]);
-  const lows   = rows.map(r=>+r[3]);
-  return {closes, highs, lows, close:closes.at(-1)};
+/* ═══════════ 3 · Binance fetch helpers ═══════════ */
+async function klines(tf){
+  const url=`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}`+
+            `&interval=${tf}&limit=${LIMIT_CAND}`;
+  return fetch(url).then(r=>r.json());
+}
+async function fundingHist(){
+  const u=`https://fapi.binance.com/fapi/v1/fundingRate?symbol=${SYMBOL}&limit=1000`;
+  return fetch(u).then(r=>r.json());
+}
+async function openInterestNow(){
+  const u=`https://fapi.binance.com/fapi/v1/openInterest?symbol=${SYMBOL}`;
+  return fetch(u).then(r=>r.json());
+}
+async function openInterestHist(){
+  const u=`https://fapi.binance.com/futures/data/openInterestHist?symbol=${SYMBOL}&period=1h&limit=24`;
+  return fetch(u).then(r=>r.json());
 }
 
-async function poll(){
+/* ═══════════ 4 · Block A loop ═══════════ */
+async function pollA(){
   for(const [label,tf] of Object.entries(TF_MAP)){
     try{
-      const {closes,highs,lows,close} = await fetchCloses(tf);
-      const ema50  = ema(closes,50);
-      const ema200 = ema(closes,200);
-      const rsi14  = rsi(closes,14);
-      const stdev  = std(closes,20);
-      const bbWidth= stdev? ((4*stdev/close)*100).toFixed(2):null; // 4σ width
-      const atr14  = atr(highs,lows,closes,14);
-      const atrPct = atr14? ((atr14/close)*100).toFixed(2):null;
+      const rows = await klines(tf);                         // newest→oldest order
+      const closes = rows.map(r=>+r[4]);
+      const highs  = rows.map(r=>+r[2]);
+      const lows   = rows.map(r=>+r[3]);
+      const close  = closes.at(-1);
 
-      [['ema50',ema50],['ema200',ema200],['rsi',rsi14],
-       ['bb',bbWidth],['atr',atrPct]].forEach(([k,v],idx)=>{
-        document.getElementById(`${label}-${k}`).textContent=
-          fmt(v,idx<2?2:(k==='rsi'?1:2));
-      });
-    }catch(e){ console.error(label,e); }
+      const v50   = ema(closes,50),  v200 = ema(closes,200);
+      const r14   = rsi(closes,14);
+      const bw    = std(closes,20)? ((4*std(closes,20)/close)*100).toFixed(2):null;
+      const a14   = atr(highs,lows,closes,14);
+      const aPct  = a14? ((a14/close)*100).toFixed(2):null;
+
+      [['ema50',v50],['ema200',v200],['rsi',r14],['bb',bw],['atr',aPct]]
+        .forEach(([k,v])=>document.getElementById(`${label}-${k}`).textContent =
+          fmt(v,k==='rsi'?1:2));
+    }catch(e){console.error('Block A',label,e);}
   }
   document.getElementById('status').textContent =
     'Last refresh '+new Date().toLocaleTimeString();
 }
 
-/* ---------- 4 · START LOOP ---------- */
-poll(); setInterval(poll, POLL_MS);
+/* ═══════════ 5 · Block B helpers ═══════════ */
+function setB(key,val,cls=''){
+  const tbody=document.getElementById('tblB').querySelector('tbody');
+  let tr=tbody.querySelector(`tr[data-k="${key}"]`);
+  if(!tr){ tr=document.createElement('tr'); tr.dataset.k=key;
+    tr.innerHTML=`<td class="p-1">${key}</td><td class="p-1" data-v></td>`;
+    tbody.appendChild(tr); }
+  const td=tr.querySelector('[data-v]'); td.textContent=val; td.className=`p-1 ${cls}`;
+}
+function zScore(a){
+  const m=a.reduce((s,x)=>s+x,0)/a.length;
+  const sd=Math.sqrt(a.reduce((s,x)=>s+(x-m)**2,0)/a.length);
+  return sd? (a.at(-1)-m)/sd : 0;
+}
+
+/* ═══════════ 6 · Block B loop ═══════════ */
+async function pollB(){
+  try{
+    /* Funding rate z-score */
+    const fHist = await fundingHist();                     // newest→oldest
+    const frArr = fHist.slice(-42).map(d=>+d.fundingRate); // ≈14 d
+    const frZ   = zScore(frArr).toFixed(2);
+    const frCls = Math.abs(frZ)>=2 ? (frZ>0?'text-rose-600':'text-emerald-600') : '';
+    setB('Funding z-score', frZ, frCls);
+
+    /* Open-interest Δ 24 h */
+    const [oiNow, oiHist] = await Promise.all([openInterestNow(), openInterestHist()]);
+    const latest = +oiNow.openInterest;
+    const past   = +oiHist[0].sumOpenInterest;             // 24 h ago
+    const pct24  = ((latest-past)/past*100).toFixed(1);
+    const oiCls  = pct24>0 ? 'text-emerald-600' : 'text-rose-600';
+    setB('OI %Δ (24 h)', pct24+' %', oiCls);
+  }catch(err){
+    console.error('Block B',err);
+    setB('Funding z-score','⚠️');
+    setB('OI %Δ (24 h)','⚠️');
+  }
+}
+
+/* ═══════════ 7 · Kick everything off ═══════════ */
+pollA(); pollB();
+setInterval(pollA, POLL_A_MS);
+setInterval(pollB, POLL_B_MS);
 </script>
 </body>
 </html>
