@@ -1,0 +1,6 @@
+[build]
+  publish    = "."               # serve index.html from repo root
+  functions  = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"       # faster JS bundling
