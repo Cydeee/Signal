@@ -3,7 +3,7 @@ const puppeteer = require('puppeteer');
 const fs        = require('fs');
 
 (async () => {
-  // 1) launch headless Chromium without sandbox on GitHub runners
+  // 1) launch headless Chromium without sandbox
   const browser = await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox','--disable-setuid-sandbox']
@@ -15,20 +15,24 @@ const fs        = require('fs');
     waitUntil: 'load',
     timeout: 60000
   });
+  // ensure table has at least one row
+  await page.waitForSelector('table tbody tr', { timeout: 60000 });
 
-  // 3) helper: click a tab and scrape its table
-  async function scrapeTab(buttonText) {
-    // find and click the button whose text exactly matches
-    const [btn] = await page.$x(`//button[normalize-space()="${buttonText}"]`);
-    if (!btn) throw new Error(`Tab "${buttonText}" not found`);
-    await btn.click();
+  // 3) helper: click a timeframe button and scrape its BTC row
+  async function scrapeTab(labelText) {
+    // click the button whose innerText exactly matches labelText
+    await page.evaluate((text) => {
+      const btn = Array.from(document.querySelectorAll('button'))
+                       .find(b => b.innerText.trim() === text);
+      if (!btn) throw new Error(`Button "${text}" not found`);
+      btn.click();
+    }, labelText);
 
-    // give it a moment to re-render
+    // wait for re-render
     await new Promise(r => setTimeout(r, 2000));
-    // wait for the table rows
     await page.waitForSelector('table tbody tr', { timeout: 30000 });
 
-    // scrape BTC row
+    // extract the BTC row
     return await page.evaluate(() => {
       const parseVal = txt => parseFloat(txt.replace(/[$,M]/g, '')) || 0;
       const rows     = Array.from(document.querySelectorAll('table tbody tr'));
@@ -38,52 +42,21 @@ const fs        = require('fs');
       });
       if (!btcRow) throw new Error('BTC row not found');
       const cells = btcRow.querySelectorAll('td');
-
-      // table columns: [0]=sym, [1]=exch, [2]=Long, [3]=Short, [4]=Net?, [5]=Total?
       const long  = parseVal(cells[2]?.innerText);
       const short = parseVal(cells[3]?.innerText);
+      // column 5 is “Total” when present
       const total = parseVal(cells[5]?.innerText) || (long + short);
-
       return { long, short, total };
     });
   }
 
-  // 4) Pull each interval
-  const out = {
-    // UI doesn’t support 15m, so we default to zeros here
-    '15m': { long: 0, short: 0, total: 0 },
-    '1h':  null,
-    '4h':  null,
-    '12h': null,
-    '24h': null
+  // 4) define which tabs & labels to scrape
+  const intervals = {
+    '15m': null,            // Coinglass UI doesn’t support 15 m aggregate
+    '1h':  '1 hour',
+    '4h':  '4 hour',
+    '12h': '12 hour',
+    '24h': '24 hour'
   };
 
-  for (const [label, tabText] of [
-    ['1h',  '1 hour'],
-    ['4h',  '4 hour'],
-    ['12h', '12 hour'],
-    ['24h', '24 hour']
-  ]) {
-    try {
-      out[label] = await scrapeTab(tabText);
-    } catch (err) {
-      console.error(`Failed to scrape ${label}:`, err.message);
-      // fallback to zeros on error
-      out[label] = { long: 0, short: 0, total: 0 };
-    }
-  }
-
-  await browser.close();
-
-  // 5) write the result
-  fs.writeFileSync(
-    './public/liquidation-data.json',
-    JSON.stringify(out, null, 2)
-  );
-
-  console.log('✅ liquidation-data.json updated:', out);
-  process.exit(0);
-})().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+  const out = {
