@@ -1,7 +1,11 @@
 {
   "name": "signal-scraper",
   "version": "1.0.0",
+  "type": "module",
   "scripts": {
     "scrape:liquidation": "node scripts/scrape-liquidations.js"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
   }
 }
