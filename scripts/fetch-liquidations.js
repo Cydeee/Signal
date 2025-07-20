@@ -2,45 +2,35 @@
 const fs = require('fs');
 
 (async () => {
-  // 1) Pull down the page HTML
-  const html = await fetch('https://www.coinglass.com/LiquidationData')
-    .then(r => r.text());
+  const EXCHANGE  = 'Binance';
+  const SYMBOL    = 'BTC';
+  const ENDPOINT  = `https://open-api-v4.coinglass.com/api/futures/liquidation/coin-list?exchange=${EXCHANGE}`;
 
-  // 2) Extract the Next.js JSON blob
-  const match = html.match(
-    /<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/
-  );
-  if (!match) {
-    throw new Error('Could not find __NEXT_DATA__ script tag');
-  }
-  const nextData = JSON.parse(match[1]);
+  // 1) Fetch the coin list
+  const resp = await fetch(ENDPOINT);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching Coin List`);
+  const js   = await resp.json();
+  if (js.code !== '0') throw new Error(`API error: ${js.msg}`);
 
-  // 3) Navigate to the Total Liquidations data
-  //    (this path is what Coinglass uses in initialState)
-  const allLiq = nextData
-    .props
-    .pageProps
-    .initialState
-    .totalLiquidation; 
+  // 2) Find BTC entry
+  const entry = js.data.find(x => x.symbol === SYMBOL);
+  if (!entry) throw new Error(`Symbol ${SYMBOL} not found in data`);
 
-  if (!Array.isArray(allLiq)) {
-    throw new Error('Unexpected shape for totalLiquidation');
-  }
-
-  // 4) Find the BTCUSDT entry
-  const btc = allLiq.find(x => x.symbol === 'BTCUSDT');
-  if (!btc) {
-    throw new Error('BTCUSDT data not found in totalLiquidation');
+  // 3) Extract your three intervals
+  const out = {};
+  for (const interval of ['1h','4h','24h']) {
+    const longKey  = `long_liquidation_usd_${interval}`;
+    const shortKey = `short_liquidation_usd_${interval}`;
+    const longVal  = parseFloat(entry[longKey])  || 0;
+    const shortVal = parseFloat(entry[shortKey]) || 0;
+    out[interval] = {
+      long:  +longVal.toFixed(2),
+      short: +shortVal.toFixed(2),
+      total: +((longVal + shortVal).toFixed(2))
+    };
   }
 
-  // 5) Build our three-interval snapshot
-  const out = {
-    '1h':  { long: btc['1hLong'],  short: btc['1hShort'],  total: btc['1hLong']  + btc['1hShort']  },
-    '4h':  { long: btc['4hLong'],  short: btc['4hShort'],  total: btc['4hLong']  + btc['4hShort']  },
-    '24h': { long: btc['24hLong'], short: btc['24hShort'], total: btc['24hLong'] + btc['24hShort'] },
-  };
-
-  // 6) Write it so Netlify will serve it
+  // 4) Write to public/liquidation-data.json
   fs.writeFileSync(
     './public/liquidation-data.json',
     JSON.stringify(out, null, 2)
