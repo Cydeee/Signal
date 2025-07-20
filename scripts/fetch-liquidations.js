@@ -1,81 +1,50 @@
 // scripts/fetch-liquidations.js
-const puppeteer = require('puppeteer');
-const fs        = require('fs');
+const fs = require('fs');
 
-;(async () => {
-  // 1) Launch Chromium (no-sandbox for GitHub runners)
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox','--disable-setuid-sandbox']
-  });
-  const page = await browser.newPage();
+(async () => {
+  // 1) Pull down the page HTML
+  const html = await fetch('https://www.coinglass.com/LiquidationData')
+    .then(r => r.text());
 
-  // 2) Navigate and wait for the table
-  await page.goto('https://www.coinglass.com/LiquidationData', {
-    waitUntil: 'networkidle0',
-    timeout: 60000
-  });
-  // Give React a moment
-  await new Promise(r => setTimeout(r, 5000));
+  // 2) Extract the Next.js JSON blob
+  const match = html.match(
+    /<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/
+  );
+  if (!match) {
+    throw new Error('Could not find __NEXT_DATA__ script tag');
+  }
+  const nextData = JSON.parse(match[1]);
 
-  // 3) Scrape by header + “BTC” row
-  const result = await page.evaluate(() => {
-    // parse “1.23M” → 1_230_000, “456,789” → 456789
-    const parseVal = txt => {
-      let v = txt.replace(/\$/g, '').replace(/,/g, '').trim();
-      const isM = /M$/i.test(v);
-      if (isM) v = v.slice(0, -1);
-      const n = parseFloat(v) || 0;
-      return isM ? n * 1e6 : n;
-    };
+  // 3) Navigate to the Total Liquidations data
+  //    (this path is what Coinglass uses in initialState)
+  const allLiq = nextData
+    .props
+    .pageProps
+    .initialState
+    .totalLiquidation; 
 
-    // find the table whose <th> row contains “1h Long”
-    const tables = Array.from(document.querySelectorAll('table'));
-    const tbl = tables.find(t => {
-      const heads = Array.from(t.querySelectorAll('thead th')).map(th => th.innerText.trim());
-      return heads.includes('1h Long');
-    });
-    if (!tbl) throw new Error('Total Liquidations table not found');
+  if (!Array.isArray(allLiq)) {
+    throw new Error('Unexpected shape for totalLiquidation');
+  }
 
-    // map header labels → column indexes
-    const headers = Array.from(tbl.querySelectorAll('thead th')).map(th => th.innerText.trim());
-    const idx = name => {
-      const i = headers.indexOf(name);
-      if (i < 0) throw new Error(`Missing header "${name}"`);
-      return i;
-    };
-    const i1L  = idx('1h Long'),  i1S  = idx('1h Short');
-    const i4L  = idx('4h Long'),  i4S  = idx('4h Short');
-    const i24L = idx('24h Long'), i24S = idx('24h Short');
+  // 4) Find the BTCUSDT entry
+  const btc = allLiq.find(x => x.symbol === 'BTCUSDT');
+  if (!btc) {
+    throw new Error('BTCUSDT data not found in totalLiquidation');
+  }
 
-    // find the row whose first cell is exactly “BTC”
-    const rows = Array.from(tbl.querySelectorAll('tbody tr'));
-    const btcRow = rows.find(r => {
-      const c0 = r.querySelector('td')?.innerText.trim();
-      return c0 === 'BTC';
-    });
-    if (!btcRow) throw new Error('BTC row not found');
+  // 5) Build our three-interval snapshot
+  const out = {
+    '1h':  { long: btc['1hLong'],  short: btc['1hShort'],  total: btc['1hLong']  + btc['1hShort']  },
+    '4h':  { long: btc['4hLong'],  short: btc['4hShort'],  total: btc['4hLong']  + btc['4hShort']  },
+    '24h': { long: btc['24hLong'], short: btc['24hShort'], total: btc['24hLong'] + btc['24hShort'] },
+  };
 
-    const cells = Array.from(btcRow.querySelectorAll('td')).map(td => td.innerText.trim());
-
-    // parse each interval
-    const long1  = parseVal(cells[i1L]),  short1  = parseVal(cells[i1S]);
-    const long4  = parseVal(cells[i4L]),  short4  = parseVal(cells[i4S]);
-    const long24 = parseVal(cells[i24L]), short24 = parseVal(cells[i24S]);
-
-    return {
-      '1h':  { long: +long1.toFixed(2),  short: +short1.toFixed(2),  total: +(long1  + short1 ).toFixed(2) },
-      '4h':  { long: +long4.toFixed(2),  short: +short4.toFixed(2),  total: +(long4  + short4 ).toFixed(2) },
-      '24h': { long: +long24.toFixed(2), short: +short24.toFixed(2), total: +(long24 + short24).toFixed(2) },
-    };
-  });
-
-  await browser.close();
-
-  // 4) Write JSON so Netlify serves it at /public/liquidation-data.json
+  // 6) Write it so Netlify will serve it
   fs.writeFileSync(
     './public/liquidation-data.json',
-    JSON.stringify(result, null, 2)
+    JSON.stringify(out, null, 2)
   );
-  console.log('✅ liquidation-data.json updated:', result);
+
+  console.log('✅ liquidation-data.json updated:', out);
 })();
