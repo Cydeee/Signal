@@ -1,5 +1,17 @@
 {
-  "long": 118551.6,
-  "short": 0.35,
-  "total": 305.74
+  "1h": {
+    "long": 1,
+    "short": 4,
+    "total": 5
+  },
+  "4h": {
+    "long": 1,
+    "short": 4,
+    "total": 5
+  },
+  "24h": {
+    "long": 1,
+    "short": 4,
+    "total": 5
+  }
 }
