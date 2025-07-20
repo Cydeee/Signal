@@ -117,9 +117,9 @@ export default async (request) => {
     result.errors.push(`B: ${e.message}`);
   }
 
-  // ─── BLOCK C: Liquidations via pre-fetched JSON ───────────────────────────
+  // ─── BLOCK C: Liquidations via pre-fetched JSON (15m, 1h, 4h, 24h) ───────
   try {
-    // build a URL to /liquidation-data.json on the same host that invoked this Edge Function
+    // Note the leading /public/ so it matches your published path
     const dataUrl = new URL('/public/liquidation-data.json', request.url).toString();
     const resp    = await fetch(dataUrl);
 
@@ -127,8 +127,21 @@ export default async (request) => {
       throw new Error(`HTTP ${resp.status} fetching ${dataUrl}`);
     }
 
-    const snapshot = await resp.json();  // now guaranteed to be JSON
-    result.dataC = snapshot;
+    // JSON must be:
+    // {
+    //   "15m": { long: …, short: …, total: … },
+    //   "1h":  { … },
+    //   "4h":  { … },
+    //   "24h": { … }
+    // }
+    const snapshot = await resp.json();
+
+    result.dataC = {
+      '15m': snapshot['15m'],
+      '1h':  snapshot['1h'],
+      '4h':  snapshot['4h'],
+      '24h': snapshot['24h']
+    };
   } catch (e) {
     result.errors.push(`C: ${e.message}`);
   }
