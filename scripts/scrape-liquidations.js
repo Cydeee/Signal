@@ -1,66 +1,70 @@
 // scripts/scrape-liquidations.js
 
-import { writeFileSync } from 'fs';
-import { resolve }        from 'path';
-import fetch              from 'node-fetch';  // polyfill for Node < 20, but works on 18+
+import fs   from 'fs';
+import path from 'path';
+import fetch from 'node-fetch';  // we’ll add this to package.json
 
-async function main() {
-  // ── SPOT DATA ──────────────────────────────────────────────
-  const spotRes = await fetch('https://capi.coinglass.com/api/coin/liquidation');
-  if (!spotRes.ok) throw new Error(`Spot HTTP ${spotRes.status}`);
-  const spotJson = await spotRes.json();
-
-  // normalize to array of records
-  let list;
-  if (Array.isArray(spotJson)) {
-    list = spotJson;
-  } else if (Array.isArray(spotJson.data)) {
-    list = spotJson.data;
-  } else if (typeof spotJson.data === 'object') {
-    list = Object.entries(spotJson.data).map(([sym, rec]) => {
-      rec.symbol ??= sym;
-      return rec;
-    });
-  } else if (typeof spotJson === 'object') {
-    list = Object.entries(spotJson).map(([sym, rec]) => {
-      rec.symbol ??= sym;
-      return rec;
-    });
-  } else {
-    throw new Error('Unexpected spot JSON format');
-  }
-
-  const btc = list.find(c=>c.symbol==='BTC');
-  if (!btc) throw new Error(`BTC not found; symbols: ${list.map(c=>c.symbol).slice(0,5).join(', ')}`);
-
-  const spot = {
-    '1h':  { long: btc.long_liquidation_usd_1h,  short: btc.short_liquidation_usd_1h,  total: btc.liquidation_usd_1h  },
-    '4h':  { long: btc.long_liquidation_usd_4h,  short: btc.short_liquidation_usd_4h,  total: btc.liquidation_usd_4h  },
-    '24h': { long: btc.long_liquidation_usd_24h, short: btc.short_liquidation_usd_24h, total: btc.liquidation_usd_24h }
+async function fetchWindow(symbol, spanMs) {
+  const now = Date.now();
+  const payload = {
+    jsonrpc: '2.0',
+    id:      1,
+    method:  'public/get_last_trades_by_instrument_and_time',
+    params: {
+      instrument_name: `${symbol}-PERPETUAL`,
+      start_timestamp: now - spanMs,
+      end_timestamp:   now,
+      count:           1000,
+      include_old:     false
+    }
   };
 
-  // ── FUTURES CHARTS ──────────────────────────────────────────
-  const intervals = { '1h': 'h1', '4h': 'h4', '24h': 'h24' };
-  const futures = {};
+  const res = await fetch(
+    'https://www.deribit.com/api/v2/public/get_last_trades_by_instrument_and_time',
+    {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload)
+    }
+  );
+  if (!res.ok) throw new Error(`${symbol} ${spanMs}ms HTTP ${res.status}`);
+  const jr = await res.json();
+  const trades = jr.result?.trades;
+  if (!Array.isArray(trades)) throw new Error('Unexpected RPC shape');
 
-  for (const [label, t] of Object.entries(intervals)) {
-    const url = new URL('https://capi.coinglass.com/api/futures/liquidation/chart');
-    url.searchParams.set('symbol','BTC-PERPETUAL');
-    url.searchParams.set('timeType', t);
-
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`Futures ${t} HTTP ${r.status}`);
-    futures[label] = await r.json();
+  let long = 0, short = 0;
+  for (const t of trades) {
+    if (t.trade_type !== 'liquidation') continue;
+    const usd = t.price * t.amount;    // $1 per contract
+    if (t.direction === 'sell')  long  += usd;
+    else if (t.direction === 'buy') short += usd;
   }
-
-  // ── WRITE OUTPUT ────────────────────────────────────────────
-  const out = { spot, futures };
-  const file = resolve(process.cwd(), 'liquidation.json');
-  writeFileSync(file, JSON.stringify(out, null, 2));
-  console.log('✔ liquidation.json written');
+  return {
+    long:  +long.toFixed(2),
+    short: +short.toFixed(2),
+    total: +((long + short).toFixed(2))
+  };
 }
 
-main().catch(err => {
-  console.error(err);
+async function main() {
+  const symbol = 'BTC';  // ←– swap to ETH, SOL, etc.
+  const windows = {
+    '1h':  1  * 60 * 60 * 1000,
+    '4h':  4  * 60 * 60 * 1000,
+    '24h': 24 * 60 * 60 * 1000,
+  };
+
+  const out = {};
+  for (const [label, span] of Object.entries(windows)) {
+    out[label] = await fetchWindow(symbol, span);
+  }
+
+  const file = path.resolve(process.cwd(), 'liquidation.json');
+  fs.writeFileSync(file, JSON.stringify(out, null, 2));
+  console.log(`✔ Wrote ${file}`);
+}
+
+main().catch(e => {
+  console.error(e);
   process.exit(1);
 });
