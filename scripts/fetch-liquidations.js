@@ -3,35 +3,49 @@ const puppeteer = require('puppeteer');
 const fs        = require('fs');
 
 (async () => {
-  // 1) Launch headless Chromium without sandbox (for GitHub runners)
   const browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: ['--no-sandbox','--disable-setuid-sandbox']
   });
   const page = await browser.newPage();
 
-  // 2) Navigate to Coinglass liquidation page
+  // 1) Navigate to Coinglass
   await page.goto('https://www.coinglass.com/LiquidationData', {
-    waitUntil: 'load',
-    timeout: 60000
+    waitUntil: 'load', timeout: 60000
   });
-  await page.waitForSelector('table tbody tr', { timeout: 60000 });
+  await page.waitForSelector('button', { timeout: 60000 });
 
-  // 3) Helper: click a timeframe button and scrape BTC row
+  // 2) Discover which buttons map to which intervals
+  const tabLabels = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('button')).map(b => b.innerText.trim())
+  );
+
+  console.log('Found buttons:', tabLabels.join(' | '));
+
+  // Build a map { '1h': '1 hour', '4h': '4 hour', … }
+  const tabMap = {};
+  tabLabels.forEach(label => {
+    const m = label.match(/^(\d+)\s*h/i);
+    if (m) tabMap[`${m[1]}h`] = label;
+  });
+
+  console.log('Mapped intervals:', JSON.stringify(tabMap));
+
+  // 3) Helper: click & scrape
   async function scrapeTab(labelText) {
-    // Click the button exactly matching labelText
-    await page.evaluate((text) => {
+    // click
+    await page.evaluate(text => {
       const btn = Array.from(document.querySelectorAll('button'))
                        .find(b => b.innerText.trim() === text);
       if (!btn) throw new Error(`Button "${text}" not found`);
       btn.click();
     }, labelText);
 
-    // Wait for the table to re-render
+    // wait to re-render
     await new Promise(r => setTimeout(r, 2000));
     await page.waitForSelector('table tbody tr', { timeout: 30000 });
 
-    // Extract the BTC row values
+    // scrape BTC row
     return await page.evaluate(() => {
       const parseVal = txt => parseFloat(txt.replace(/[$,M]/g, '')) || 0;
       const rows = Array.from(document.querySelectorAll('table tbody tr'));
@@ -48,39 +62,39 @@ const fs        = require('fs');
     });
   }
 
-  // 4) Define intervals (15m is unsupported in the public UI)
-  const intervals = {
-    '15m': null,
-    '1h':  '1 hour',
-    '4h':  '4 hour',
-    '12h': '12 hour',
-    '24h': '24 hour'
-  };
-
-  // 5) Scrape each interval, falling back to zeros on error
+  // 4) Scrape each interval
+  const intervals = ['15m','1h','4h','12h','24h'];
   const out = {};
-  for (const [key, label] of Object.entries(intervals)) {
-    if (!label) {
+
+  for (const key of intervals) {
+    if (key === '15m') {
       out[key] = { long: 0, short: 0, total: 0 };
-    } else {
-      try {
-        out[key] = await scrapeTab(label);
-      } catch (err) {
-        console.error(`Failed to scrape ${key}:`, err.message);
-        out[key] = { long: 0, short: 0, total: 0 };
-      }
+      continue;
+    }
+    const label = tabMap[key];
+    if (!label) {
+      console.error(`No button found in map for ${key}`);
+      out[key] = { long: 0, short: 0, total: 0 };
+      continue;
+    }
+    try {
+      out[key] = await scrapeTab(label);
+    } catch (e) {
+      console.error(`Failed to scrape ${key}:`, e.message);
+      out[key] = { long: 0, short: 0, total: 0 };
     }
   }
 
   await browser.close();
 
-  // 6) Write the JSON so Netlify can serve it from /public/liquidation-data.json
+  // 5) Write JSON
   fs.writeFileSync(
     './public/liquidation-data.json',
     JSON.stringify(out, null, 2)
   );
 
   console.log('✅ liquidation-data.json updated:', out);
+  process.exit(0);
 })().catch(err => {
   console.error(err);
   process.exit(1);
