@@ -7,6 +7,7 @@ export default async (request) => {
   const result = {
     dataA: {},
     dataB: null,
+    dataC: null,    // ← added
     dataD: null,
     dataE: null,
     errors: []
@@ -114,6 +115,16 @@ export default async (request) => {
     result.dataB = { fundingZ: z, oiDelta24h: pct24h };
   } catch (e) {
     result.errors.push(`B: ${e.message}`);
+  }
+
+  // ─── BLOCK C: Liquidations via pre-fetched JSON ───────────────────────────
+  try {
+    const snapshot = await fetch(
+      'https://YOUR_NETLIFY_DOMAIN/liquidation-data.json'
+    ).then(res => res.json());
+    result.dataC = snapshot;
+  } catch (e) {
+    result.errors.push(`C: ${e.message}`);
   }
 
   // ─── BLOCK D: Sentiment ──────────────────────────────────────────────────────
