@@ -13,7 +13,7 @@ export default async (request) => {
     errors: []
   };
 
-  // ─── Indicator helpers ────────────────────────────────────────────────────
+  // ─── Indicator helpers ───────────────────────────────────────────────
   function sma(a, p) {
     return a.slice(-p).reduce((sum, x) => sum + x, 0) / p;
   }
@@ -61,7 +61,7 @@ export default async (request) => {
     return sma(trs.slice(-p), p);
   }
 
-  // ─── BLOCK A: Price / Volatility / Trend ────────────────────────────────
+  // ─── BLOCK A: Price / Volatility / Trend ─────────────────────────────
   for (const tf of ['15m', '1h', '4h', '1d']) {
     try {
       const rows = await fetch(
@@ -84,7 +84,7 @@ export default async (request) => {
     }
   }
 
-  // ─── BLOCK B: Derivatives Positioning ──────────────────────────────────────
+  // ─── BLOCK B: Derivatives Positioning ────────────────────────────────
   try {
     const fr = await fetch(
       `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${SYMBOL}&limit=1000`
@@ -117,16 +117,67 @@ export default async (request) => {
     result.errors.push(`B: ${e.message}`);
   }
 
-  // ─── BLOCK C: Coinglass liquidations ────────────────────────────
-try {
-  const url = new URL('/liquidation.json', request.url).href;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  result.dataC = await res.json();
-} catch (e) {
-  result.errors.push(`C: ${e.message}`);
-}
-  // ─── BLOCK E: Macro Risk Context ─────────────────────────────────────────────
+  // ─── BLOCK C: Binance liquidation via allForceOrders ────────────────
+  try {
+    const now     = Date.now();
+    const windows = { '1h': 1, '4h': 4, '24h': 24 };
+    const dataC   = {};
+
+    for (const [lbl, hrs] of Object.entries(windows)) {
+      const startTs = now - hrs * 3600_000;
+      const url     = new URL('https://fapi.binance.com/fapi/v1/allForceOrders');
+      url.searchParams.set('symbol', SYMBOL);
+      url.searchParams.set('startTime', startTs);
+      url.searchParams.set('endTime',   now);
+
+      const res    = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const orders = await res.json();
+
+      let long = 0, short = 0;
+      for (const o of orders) {
+        const usd = +o.origQty * +o.price;
+        if (o.side === 'SELL') long  += usd;
+        else                    short += usd;
+      }
+
+      dataC[lbl] = {
+        long:  +long.toFixed(2),
+        short: +short.toFixed(2),
+        total: +((long + short).toFixed(2))
+      };
+    }
+
+    result.dataC = dataC;
+  } catch (e) {
+    result.errors.push(`C: ${e.message}`);
+  }
+
+  // ─── BLOCK D: Sentiment ───────────────────────────────────────────────
+  try {
+    const cg = await fetch(
+      'https://api.coingecko.com/api/v3/coins/bitcoin'
+    ).then(r => r.json());
+    const upPct =
+      cg.sentiment_votes_up_percentage ??
+      cg.community_data?.sentiment_votes_up_percentage;
+    if (upPct == null) throw new Error('Missing sentiment_votes_up_percentage');
+
+    const fg = await fetch(
+      'https://api.alternative.me/fng/?limit=1'
+    ).then(r => r.json());
+    const fgData = fg.data?.[0];
+    if (!fgData) throw new Error('Missing Fear & Greed data');
+
+    result.dataD = {
+      sentimentUpPct: +upPct.toFixed(1),
+      fearGreed:      `${fgData.value} · ${fgData.value_classification}`,
+    };
+  } catch (e) {
+    result.errors.push(`D: ${e.message}`);
+  }
+
+  // ─── BLOCK E: Macro Risk Context ───────────────────────────────────────
   try {
     const gv = await fetch('https://api.coingecko.com/api/v3/global')
       .then(r => r.json());
@@ -143,7 +194,7 @@ try {
     result.errors.push(`E: ${e.message}`);
   }
 
-  // ─── Return JSON ────────────────────────────────────────────────────────────
+  // ─── Return JSON ───────────────────────────────────────────────────────
   return new Response(
     JSON.stringify({ ...result, timestamp: Date.now() }),
     { headers: { 'Content-Type': 'application/json' } }
