@@ -1,50 +1,70 @@
 // scripts/fetch-liquidations.js
-const fs = require('fs');
+const puppeteer = require('puppeteer');
+const fs        = require('fs');
 
-(async () => {
-  const SYMBOL    = 'BTCUSDT';
-  const ENDPOINT  = `https://fapi.binance.com/fapi/v1/allForceOrders?symbol=${SYMBOL}`;
-  const INTERVALS = [
-    { key: '1h',  ms: 1  * 60 * 60 * 1000 },
-    { key: '4h',  ms: 4  * 60 * 60 * 1000 },
-    { key: '24h', ms: 24 * 60 * 60 * 1000 },
-  ];
+;(async () => {
+  // ─── Launch Chromium (GitHub runners need no‐sandbox) ───────
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox','--disable-setuid-sandbox']
+  });
+  const page = await browser.newPage();
 
-  // 1) Fetch all liquidation orders from Binance Futures (no API key needed)
-  const now    = Date.now();
-  const resp   = await fetch(ENDPOINT);
-  if (!resp.ok) throw new Error(`Binance HTTP ${resp.status}`);
-  const orders = await resp.json();  // array of {symbol, side, price, quantity, time, ...}
+  // ─── Go to Coinglass LiquidationData ───────────────────────
+  await page.goto('https://www.coinglass.com/LiquidationData', {
+    waitUntil: 'load',
+    timeout: 60000
+  });
+  // give the React UI time to fetch & render
+  await page.waitForTimeout(5000);
 
-  // 2) Aggregate USD value by interval and side
-  const out = {};
-  for (const {key, ms} of INTERVALS) {
-    const cutoff = now - ms;
-    let long = 0, short = 0;
-    for (const o of orders) {
-      if (o.time < cutoff) continue;
-      // USD value = price * quantity
-      const usd = parseFloat(o.price) * parseFloat(o.origQty || o.orderQty || o.quantity);
-      if (o.side === 'SELL') {
-        // a SELL liquidation means a LONG position was closed
-        long += usd;
-      } else if (o.side === 'BUY') {
-        // a BUY liquidation means a SHORT position was closed
-        short += usd;
-      }
-    }
-    out[key] = {
-      long:  +long.toFixed(2),
-      short: +short.toFixed(2),
-      total: +((long + short).toFixed(2))
+  // ─── Scrape via regex + proper “M” handling ────────────────
+  const data = await page.evaluate(() => {
+    const text = document.body.innerText;
+    const intervals = ['1h', '4h', '24h'];
+    const out = {};
+
+    // parses strings like “1.185M” → 1185000, “0.6M” → 600000, “123,456” → 123456
+    const parseVal = txt => {
+      if (!txt) return 0;
+      let v = txt.replace(/[$,]/g, '').trim();
+      const isM = /M$/i.test(v);
+      if (isM) v = v.slice(0, -1);
+      const num = parseFloat(v) || 0;
+      return isM ? num * 1e6 : num;
     };
-  }
 
-  // 3) Write the JSON so Netlify serves it at /public/liquidation-data.json
+    intervals.forEach(label => {
+      // look for “1h Rekt … Long 1.185M … Short 0.6M”
+      const re = new RegExp(
+        label + '\\s+Rekt[\\s\\S]*?Long\\s*([\\d.,]+M?)[\\s\\S]*?Short\\s*([\\d.,]+M?)',
+        'i'
+      );
+      const m = text.match(re);
+      if (m) {
+        const long  = parseVal(m[1]);
+        const short = parseVal(m[2]);
+        out[label] = {
+          long,
+          short,
+          total: parseFloat((long + short).toFixed(2))
+        };
+      } else {
+        console.error(`⚠️ Could not match ${label} Rekt block`);
+        out[label] = { long: 0, short: 0, total: 0 };
+      }
+    });
+
+    return out;
+  });
+
+  await browser.close();
+
+  // ─── Write the JSON so Netlify serves it at /public/liquidation-data.json ─
   fs.writeFileSync(
     './public/liquidation-data.json',
-    JSON.stringify(out, null, 2)
+    JSON.stringify(data, null, 2)
   );
 
-  console.log('✅ liquidation-data.json updated:', out);
+  console.log('✅ liquidation-data.json updated:', data);
 })();
