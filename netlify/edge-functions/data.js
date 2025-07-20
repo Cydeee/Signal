@@ -1,21 +1,21 @@
 // netlify/edge-functions/data.js
 
 export default async (request) => {
-  const SYMBOL = 'BTCUSDT';
-  const LIMIT  = 250;
+  const SYMBOL = 'BTCUSDT';     // change here if you need another pair
+  const LIMIT  = 250;           // # of klines for the TA part (bloc A)
 
   const result = {
     dataA: {},
     dataB: null,
-    dataC: {},        // initialized to empty object
+    dataC: {},          // will hold liquidation stats
     dataD: null,
     dataE: null,
     errors: []
   };
 
-  // ─── Indicator helpers ───────────────────────────────────────────────
+  // ── Indicator helpers ──────────────────────────────────────────────
   function sma(a, p) {
-    return a.slice(-p).reduce((sum, x) => sum + x, 0) / p;
+    return a.slice(-p).reduce((s, x) => s + x, 0) / p;
   }
   function std(a, p) {
     const slice = a.slice(-p);
@@ -26,9 +26,7 @@ export default async (request) => {
     if (a.length < p) return 0;
     const k = 2 / (p + 1);
     let e   = sma(a.slice(0, p), p);
-    for (let i = p; i < a.length; i++) {
-      e = a[i] * k + e * (1 - k);
-    }
+    for (let i = p; i < a.length; i++) e = a[i] * k + e * (1 - k);
     return e;
   }
   function rsi(a, p) {
@@ -61,17 +59,19 @@ export default async (request) => {
     return sma(trs.slice(-p), p);
   }
 
-  // ─── BLOCK A: Price / Volatility / Trend ─────────────────────────────
+  // ── BLOCK A: Price / Volatility / Trend ────────────────────────────
   for (const tf of ['15m', '1h', '4h', '1d']) {
     try {
       const rows = await fetch(
         `https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=${tf}&limit=${LIMIT}`
       ).then(r => r.json());
       if (!Array.isArray(rows)) throw new Error('klines not array');
+
       const c    = rows.map(r => +r[4]);
       const h    = rows.map(r => +r[2]);
       const l    = rows.map(r => +r[3]);
       const last = c.at(-1) || 1;
+
       result.dataA[tf] = {
         ema50:  +ema(c, 50).toFixed(2),
         ema200: +ema(c, 200).toFixed(2),
@@ -84,31 +84,31 @@ export default async (request) => {
     }
   }
 
-  // ─── BLOCK B: Derivatives Positioning ────────────────────────────────
+  // ── BLOCK B: Derivatives Positioning ───────────────────────────────
   try {
     const fr = await fetch(
       `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${SYMBOL}&limit=1000`
     ).then(r => r.json());
     if (!Array.isArray(fr)) throw new Error('fundingRate not array');
+
     const arr  = fr.slice(-42).map(d => +d.fundingRate);
     const mean = arr.reduce((s, x) => s + x, 0) / arr.length;
     const sd   = Math.sqrt(arr.reduce((t, x) => t + (x - mean) ** 2, 0) / arr.length);
     const z    = sd ? ((arr.at(-1) - mean) / sd).toFixed(2) : '0.00';
 
     const [oiN, oiH] = await Promise.all([
-      fetch(
-        `https://fapi.binance.com/fapi/v1/openInterest?symbol=${SYMBOL}`
-      ).then(r => r.json()),
+      fetch(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${SYMBOL}`)
+        .then(r => r.json()),
       fetch(
         `https://fapi.binance.com/futures/data/openInterestHist?symbol=${SYMBOL}&period=1h&limit=24`
       ).then(r => r.json()),
     ]);
-    if (typeof oiN.openInterest !== 'string' || !oiH[0]?.sumOpenInterest) {
+
+    if (typeof oiN.openInterest !== 'string' || !oiH[0]?.sumOpenInterest)
       throw new Error('OI shape unexpected');
-    }
+
     const pct24h = (
-      ((+oiN.openInterest - +oiH[0].sumOpenInterest) /
-        +oiH[0].sumOpenInterest) *
+      ((+oiN.openInterest - +oiH[0].sumOpenInterest) / +oiH[0].sumOpenInterest) *
       100
     ).toFixed(1);
 
@@ -117,60 +117,56 @@ export default async (request) => {
     result.errors.push(`B: ${e.message}`);
   }
 
-  // ─── BLOCK C: Liquidations (no‑auth) ───────────────────────────
-try {
-  const now     = Date.now();
-  const windows = { '1h': 1, '4h': 4, '24h': 24 };
-  const dataC   = {};
+  // ── BLOCK C: Long / Short Liquidations (no-auth) ───────────────────
+  try {
+    /*  We grab the latest 1 000 liquidation rows once and then
+        compute the 1 h, 4 h and 24 h windows from that set.        */
+    const rows = await fetch(
+      `https://fapi.binance.com/futures/data/forceOrders?symbol=${SYMBOL}&limit=1000`
+    ).then(async r => {
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.includes('application/json'))
+        throw new Error(`unexpected content-type: ${ct}`);
+      return r.json();
+    });
 
-  for (const [lbl, hrs] of Object.entries(windows)) {
-    let from = now - hrs * 3_600_000;          // window start
-    let longUsd = 0, shortUsd = 0;
+    if (!Array.isArray(rows)) throw new Error('forceOrders not array');
 
-    /*  The public endpoint returns at most 1 000 rows.
-        In practice 1 000 rows easily cover 24 h on BTC/ETH,
-        but we loop just in case a token is very active.       */
-    while (from < now) {
-      const url = new URL('https://fapi.binance.com/futures/data/forceOrders');
-      url.searchParams.set('symbol',    SYMBOL);
-      url.searchParams.set('startTime', from);
-      url.searchParams.set('endTime',   now);
-      url.searchParams.set('limit',     1000);       // max allowed
+    const now     = Date.now();
+    const windows = { '1h': 1, '4h': 4, '24h': 24 };
+    const dataC   = {};
 
-      const rows = await fetch(url.href).then(r => r.json());
-
-      if (!Array.isArray(rows) || rows.length === 0) break;
+    for (const [lbl, hrs] of Object.entries(windows)) {
+      const cutoff = now - hrs * 3_600_000;
+      let longUsd = 0, shortUsd = 0;
 
       for (const o of rows) {
-        const price = +o.avgPrice || +o.price;       // both exist, avgPrice first
+        if (o.time < cutoff) break;               // rows are newest→oldest
+        const price = +o.avgPrice || +o.price || 0;
         const usd   = +o.origQty * price;
-        if (o.side === 'SELL') longUsd  += usd;      // long position liquidated
-        else                   shortUsd += usd;      // short position liquidated
+        if (o.side === 'SELL') longUsd  += usd;   // long pos. liquidated
+        else                   shortUsd += usd;   // short pos. liquidated
       }
 
-      // advance ‘from’ so the next request continues after the last row we got
-      from = rows.at(-1).time + 1;
-      if (rows.length < 1000) break;                 // no more rows for this window
+      dataC[lbl] = {
+        long:  +longUsd.toFixed(2),
+        short: +shortUsd.toFixed(2),
+        total: +(longUsd + shortUsd).toFixed(2),
+      };
     }
 
-    dataC[lbl] = {
-      long:  +longUsd.toFixed(2),
-      short: +shortUsd.toFixed(2),
-      total: +(longUsd + shortUsd).toFixed(2),
-    };
+    result.dataC = dataC;
+  } catch (e) {
+    result.errors.push(`C: ${e.message}`);
+    result.dataC = {};
   }
 
-  result.dataC = dataC;
-} catch (e) {
-  result.errors.push(`C: ${e.message}`);
-  result.dataC = {};
-}
-
-  // ─── BLOCK D: Sentiment ──────────────────────────────────────────────
+  // ── BLOCK D: Sentiment ─────────────────────────────────────────────
   try {
     const cg = await fetch(
       'https://api.coingecko.com/api/v3/coins/bitcoin'
     ).then(r => r.json());
+
     const upPct =
       cg.sentiment_votes_up_percentage ??
       cg.community_data?.sentiment_votes_up_percentage;
@@ -179,6 +175,7 @@ try {
     const fg = await fetch(
       'https://api.alternative.me/fng/?limit=1'
     ).then(r => r.json());
+
     const fgData = fg.data?.[0];
     if (!fgData) throw new Error('Missing Fear & Greed data');
 
@@ -190,11 +187,12 @@ try {
     result.errors.push(`D: ${e.message}`);
   }
 
-  // ─── BLOCK E: Macro Risk Context ─────────────────────────────────────
+  // ── BLOCK E: Macro Risk Context ────────────────────────────────────
   try {
     const gv = await fetch('https://api.coingecko.com/api/v3/global')
       .then(r => r.json());
-    const g  = gv.data;
+
+    const g = gv.data;
     if (!g?.total_market_cap?.usd) throw new Error('Missing global data');
 
     result.dataE = {
@@ -207,7 +205,7 @@ try {
     result.errors.push(`E: ${e.message}`);
   }
 
-  // ─── Return JSON ────────────────────────────────────────────────────────
+  // ── Return JSON ────────────────────────────────────────────────────
   return new Response(
     JSON.stringify({ ...result, timestamp: Date.now() }),
     { headers: { 'Content-Type': 'application/json' } }
