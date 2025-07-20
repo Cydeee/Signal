@@ -119,9 +119,15 @@ export default async (request) => {
 
   // ─── BLOCK C: Liquidations via pre-fetched JSON ───────────────────────────
   try {
-    const snapshot = await fetch(
-      'https://signalsv2.netlify.app/liquidation-data.json'
-    ).then(res => res.json());
+    // build a URL to /liquidation-data.json on the same host that invoked this Edge Function
+    const dataUrl = new URL('/liquidation-data.json', request.url).toString();
+    const resp    = await fetch(dataUrl);
+
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status} fetching ${dataUrl}`);
+    }
+
+    const snapshot = await resp.json();  // now guaranteed to be JSON
     result.dataC = snapshot;
   } catch (e) {
     result.errors.push(`C: ${e.message}`);
