@@ -1,61 +1,39 @@
-// Signal/scripts/scrape-liquidations.js
+# .github/workflows/scrape-liquidation.yml
 
-const fs        = require('fs');
-const path      = require('path');
-const puppeteer = require('puppeteer');
+name: Scrape CoinGlass Liquidations
 
-;(async () => {
-  // 1. Launch Puppeteer (headless + no sandbox)
-  const browser = await puppeteer.launch({
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
-  const page = await browser.newPage();
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
 
-  // 2. Navigate to set cookies/CORS
-  await page.goto('https://www.coinglass.com/Liquidation/BTC', {
-    waitUntil: 'networkidle2',
-    timeout: 60000
-  });
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: true
 
-  // 3. Fetch the global coin liquidation list
-  const allCoins = await page.evaluate(async () => {
-    const res = await fetch('https://capi.coinglass.com/api/coin/liquidation');
-    if (!res.ok) throw new Error(`coin-list HTTP ${res.status}`);
-    return res.json();
-  });
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
 
-  // 4. Find BTC in that list
-  const btc = allCoins.find(c => c.symbol === 'BTC');
-  if (!btc) throw new Error('BTC not found in /api/coin/liquidation');
+      - name: Install dependencies
+        run: npm install
 
-  // 5. Shape the spot-liquidation output
-  const spot = {
-    '1h':  { long: btc.long_liquidation_usd_1h,  short: btc.short_liquidation_usd_1h,  total: btc.liquidation_usd_1h  },
-    '4h':  { long: btc.long_liquidation_usd_4h,  short: btc.short_liquidation_usd_4h,  total: btc.liquidation_usd_4h  },
-    '24h': { long: btc.long_liquidation_usd_24h, short: btc.short_liquidation_usd_24h, total: btc.liquidation_usd_24h }
-  };
+      - name: Run scraper
+        run: npm run scrape:liquidation
 
-  // 6. (Optional) Fetch the futures‐chart for each interval
-  const intervals = { '1h': 'h1', '4h': 'h4', '24h': 'h24' };
-  const futures   = {};
-  for (const [label, t] of Object.entries(intervals)) {
-    futures[label] = await page.evaluate(async type => {
-      const url = `https://capi.coinglass.com/api/futures/liquidation/chart?symbol=BTC-PERPETUAL&timeType=${type}`;
-      const r   = await fetch(url);
-      if (!r.ok) throw new Error(`${type}-chart HTTP ${r.status}`);
-      return r.json();
-    }, t);
-  }
-
-  await browser.close();
-
-  // 7. Write to JSON in your repo root
-  const output = { spot, futures };
-  const outPath = path.resolve(__dirname, '../liquidation.json');
-  fs.writeFileSync(outPath, JSON.stringify(output, null, 2));
-
-  console.log(`✔ Wrote ${outPath}`);
-})().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+      - name: Commit & push if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add liquidation.json
+          git diff --staged --quiet || git commit -m "chore: update liquidation.json"
+          git push
