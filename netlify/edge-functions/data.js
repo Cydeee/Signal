@@ -120,7 +120,7 @@ export default async (request) => {
   // ─── BLOCK C: Liquidations via pre-fetched JSON ───────────────────────────
   try {
     const snapshot = await fetch(
-      'https://YOUR_NETLIFY_DOMAIN/liquidation-data.json'
+      'https://signalsv2.netlify.app/liquidation-data.json'
     ).then(res => res.json());
     result.dataC = snapshot;
   } catch (e) {
