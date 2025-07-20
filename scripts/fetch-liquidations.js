@@ -3,50 +3,57 @@ const puppeteer = require('puppeteer');
 const fs        = require('fs');
 
 (async () => {
-  // ─── Launch without sandbox so it works on GitHub runners
+  // Launch headless Chromium without the sandbox (required on GitHub runners)
   const browser = await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
   const page = await browser.newPage();
 
-  // ─── Go to Coinglass liquidation page (default timeframe)
+  // Navigate to the Coinglass liquidation page
   await page.goto('https://www.coinglass.com/LiquidationData', {
     waitUntil: 'load',
     timeout: 60000
   });
+  // Give the React UI a few seconds to render
+  await new Promise(r => setTimeout(r, 5000));
 
-  // ─── Wait up to 60s for at least one table row
-  await page.waitForSelector('table tbody tr', { timeout: 60000 });
-  // ─── Pause briefly to ensure JS has populated the table
-  await new Promise(resolve => setTimeout(resolve, 2000));
+  // Scrape via regex over the full page text
+  const data = await page.evaluate(() => {
+    const text = document.body.innerText;
+    const intervals = ['1h', '4h', '24h'];
+    const out = {};
 
-  // ─── Scrape the BTC row
-  const snapshot = await page.evaluate(() => {
-    const parseVal = txt => parseFloat(txt.replace(/[$,M]/g, '')) || 0;
-    const rows = Array.from(document.querySelectorAll('table tbody tr'));
-    const btcRow = rows.find(r => r.innerText.includes('BTC'));
-    if (!btcRow) throw new Error('BTC row not found');
-    const cells = btcRow.querySelectorAll('td');
+    intervals.forEach(label => {
+      // Match lines like "1h Rekt" then "Long 123,456" and "Short 78,901"
+      const re = new RegExp(
+        label + '\\s+Rekt[\\s\\S]*?Long\\s*([\\d,\\.]+)[\\s\\S]*?Short\\s*([\\d,\\.]+)',
+        'i'
+      );
+      const m = text.match(re);
+      if (m) {
+        const long  = parseFloat(m[1].replace(/,/g, '')) || 0;
+        const short = parseFloat(m[2].replace(/,/g, '')) || 0;
+        out[label] = {
+          long,
+          short,
+          total: parseFloat((long + short).toFixed(2))
+        };
+      } else {
+        console.error(`⚠️ Could not find "${label} Rekt"`);  
+        out[label] = { long: 0, short: 0, total: 0 };
+      }
+    });
 
-    const long  = parseVal(cells[2]?.innerText);
-    const short = parseVal(cells[3]?.innerText);
-    // Total sometimes missing—fallback to long+short
-    const total = parseVal(cells[5]?.innerText) || (long + short);
-
-    return { long, short, total };
+    return out;
   });
 
   await browser.close();
 
-  // ─── Write JSON into public/ so Netlify will serve it
+  // Write the result so Netlify serves it at /public/liquidation-data.json
   fs.writeFileSync(
     './public/liquidation-data.json',
-    JSON.stringify(snapshot, null, 2)
+    JSON.stringify(data, null, 2)
   );
-
-  console.log('✅ liquidation-data.json updated:', snapshot);
-})().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+  console.log('✅ liquidation-data.json updated:', data);
+})();
