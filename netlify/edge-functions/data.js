@@ -117,86 +117,15 @@ export default async (request) => {
     result.errors.push(`B: ${e.message}`);
   }
 
-  // ─── BLOCK C: Liquidations via Deribit time‐filtered JSON‐RPC ─────────────
-  try {
-    const now = Date.now();
-    const windows = {
-      '1h':  1  * 60 * 60 * 1000,
-      '4h':  4  * 60 * 60 * 1000,
-      '24h': 24 * 60 * 60 * 1000,
-    };
-
-    const dataC = {};
-    for (const [label, span] of Object.entries(windows)) {
-      const payload = {
-        jsonrpc: '2.0',
-        id:      1,
-        method:  'public/get_last_trades_by_instrument_and_time',
-        params: {
-          instrument_name: 'BTC-PERPETUAL',
-          start_timestamp: now - span,
-          end_timestamp:   now,
-          count:           1000,
-          include_old:     false
-        }
-      };
-
-      const rpc = await fetch(
-        'https://www.deribit.com/api/v2/public/get_last_trades_by_instrument_and_time',
-        {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify(payload)
-        }
-      );
-      if (!rpc.ok) throw new Error(`Deribit HTTP ${rpc.status}`);
-      const jr     = await rpc.json();
-      const trades = jr.result?.trades;
-      if (!Array.isArray(trades)) throw new Error('invalid Deribit response');
-
-      let long = 0, short = 0;
-      for (const t of trades) {
-        if (t.trade_type !== 'liquidation') continue;
-        const usd = t.price * t.amount;  // $1 per contract
-        if (t.direction === 'sell')  long  += usd;
-        else if (t.direction === 'buy') short += usd;
-      }
-
-      dataC[label] = {
-        long:  +long.toFixed(2),
-        short: +short.toFixed(2),
-        total: +((long + short).toFixed(2))
-      };
-    }
-    result.dataC = dataC;
-  } catch (e) {
-    result.errors.push(`C: ${e.message}`);
-  }
-
-  // ─── BLOCK D: Sentiment ──────────────────────────────────────────────────────
-  try {
-    const cg = await fetch(
-      'https://api.coingecko.com/api/v3/coins/bitcoin'
-    ).then(r => r.json());
-    const upPct =
-      cg.sentiment_votes_up_percentage ??
-      cg.community_data?.sentiment_votes_up_percentage;
-    if (upPct == null) throw new Error('Missing sentiment_votes_up_percentage');
-
-    const fg = await fetch(
-      'https://api.alternative.me/fng/?limit=1'
-    ).then(r => r.json());
-    const fgData = fg.data?.[0];
-    if (!fgData) throw new Error('Missing Fear & Greed data');
-
-    result.dataD = {
-      sentimentUpPct: +upPct.toFixed(1),
-      fearGreed:      `${fgData.value} · ${fgData.value_classification}`,
-    };
-  } catch (e) {
-    result.errors.push(`D: ${e.message}`);
-  }
-
+  // ─── BLOCK C: Coinglass liquidations ────────────────────────────
+try {
+  const url = new URL('/liquidation.json', request.url).href;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  result.dataC = await res.json();
+} catch (e) {
+  result.errors.push(`C: ${e.message}`);
+}
   // ─── BLOCK E: Macro Risk Context ─────────────────────────────────────────────
   try {
     const gv = await fetch('https://api.coingecko.com/api/v3/global')
