@@ -117,47 +117,54 @@ export default async (request) => {
     result.errors.push(`B: ${e.message}`);
   }
 
-  // ─── BLOCK C: Binance allForceOrders ────────────────────────────────
-  try {
-    const now     = Date.now();
-    const windows = { '1h': 1, '4h': 4, '24h': 24 };
-    const dataC   = {};
+  // ─── BLOCK C: Liquidations (no‑auth) ───────────────────────────
+try {
+  const now     = Date.now();
+  const windows = { '1h': 1, '4h': 4, '24h': 24 };
+  const dataC   = {};
 
-    for (const [lbl, hrs] of Object.entries(windows)) {
-      const startTs = now - hrs * 3600_000;
-      const url     = new URL('https://fapi.binance.com/fapi/v1/allForceOrders');
-      url.searchParams.set('symbol', SYMBOL);
-      url.searchParams.set('startTime', startTs);
+  for (const [lbl, hrs] of Object.entries(windows)) {
+    let from = now - hrs * 3_600_000;          // window start
+    let longUsd = 0, shortUsd = 0;
+
+    /*  The public endpoint returns at most 1 000 rows.
+        In practice 1 000 rows easily cover 24 h on BTC/ETH,
+        but we loop just in case a token is very active.       */
+    while (from < now) {
+      const url = new URL('https://fapi.binance.com/futures/data/forceOrders');
+      url.searchParams.set('symbol',    SYMBOL);
+      url.searchParams.set('startTime', from);
       url.searchParams.set('endTime',   now);
+      url.searchParams.set('limit',     1000);       // max allowed
 
-      const res    = await fetch(url.href);
-      if (!res.ok) {
-        result.errors.push(`C[${lbl}]: HTTP ${res.status}`);
-        dataC[lbl] = { long: 0, short: 0, total: 0 };
-        continue;
+      const rows = await fetch(url.href).then(r => r.json());
+
+      if (!Array.isArray(rows) || rows.length === 0) break;
+
+      for (const o of rows) {
+        const price = +o.avgPrice || +o.price;       // both exist, avgPrice first
+        const usd   = +o.origQty * price;
+        if (o.side === 'SELL') longUsd  += usd;      // long position liquidated
+        else                   shortUsd += usd;      // short position liquidated
       }
 
-      const orders = await res.json();
-
-      let long = 0, short = 0;
-      for (const o of orders) {
-        const usd = +o.origQty * +o.price;
-        if (o.side === 'SELL') long  += usd;
-        else                    short += usd;
-      }
-
-      dataC[lbl] = {
-        long:  +long.toFixed(2),
-        short: +short.toFixed(2),
-        total: +((long + short).toFixed(2))
-      };
+      // advance ‘from’ so the next request continues after the last row we got
+      from = rows.at(-1).time + 1;
+      if (rows.length < 1000) break;                 // no more rows for this window
     }
 
-    result.dataC = dataC;
-  } catch (e) {
-    result.errors.push(`C: ${e.message}`);
-    result.dataC = {};
+    dataC[lbl] = {
+      long:  +longUsd.toFixed(2),
+      short: +shortUsd.toFixed(2),
+      total: +(longUsd + shortUsd).toFixed(2),
+    };
   }
+
+  result.dataC = dataC;
+} catch (e) {
+  result.errors.push(`C: ${e.message}`);
+  result.dataC = {};
+}
 
   // ─── BLOCK D: Sentiment ──────────────────────────────────────────────
   try {
