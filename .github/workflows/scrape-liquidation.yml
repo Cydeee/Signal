@@ -1,0 +1,34 @@
+name: Scrape CoinGlass Liquidations
+
+on:
+  schedule:
+    - cron:  '*/15 * * * *'     # every 15 minutes
+  workflow_dispatch:           # manual trigger
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run scraper
+        run: npm run scrape:liquidation
+
+      - name: Commit & push if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add liquidation.json
+          git diff --staged --quiet || git commit -m "chore: update liquidation.json"
+          git push
