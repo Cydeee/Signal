@@ -1,17 +1,17 @@
 {
   "1h": {
-    "long": 1,
-    "short": 4,
-    "total": 5
+    "long": 0,
+    "short": 0,
+    "total": 0
   },
   "4h": {
-    "long": 1,
-    "short": 4,
-    "total": 5
+    "long": 0,
+    "short": 0,
+    "total": 0
   },
   "24h": {
-    "long": 1,
-    "short": 4,
-    "total": 5
+    "long": 0,
+    "short": 0,
+    "total": 0
   }
 }
