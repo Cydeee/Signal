@@ -7,7 +7,7 @@ export default async (request) => {
   const result = {
     dataA: {},
     dataB: null,
-    dataC: null,     // ← added Block C placeholder
+    dataC: null,
     dataD: null,
     dataE: null,
     errors: []
@@ -117,7 +117,7 @@ export default async (request) => {
     result.errors.push(`B: ${e.message}`);
   }
 
-  // ─── BLOCK C: Liquidations via Deribit public API ─────────────────────────
+  // ─── BLOCK C: Liquidations via Deribit JSON-RPC ─────────────────────────
   try {
     const now     = Date.now();
     const windows = {
@@ -126,26 +126,43 @@ export default async (request) => {
       '24h': 24 * 60 * 60 * 1000,
     };
 
-    // Fetch last 1000 trades on BTC-PERPETUAL
-    const resp  = await fetch(
-      'https://www.deribit.com/api/v2/public/get_last_trades_by_instrument' +
-      '?instrument_name=BTC-PERPETUAL&count=1000&include_old=true'
-    );
-    if (!resp.ok) throw new Error(`Deribit HTTP ${resp.status}`);
-    const js     = await resp.json();
-    const trades = js.result.trades;
+    // build JSON-RPC payload
+    const payload = {
+      jsonrpc: '2.0',
+      id:      1,
+      method:  'public/get_last_trades_by_instrument',
+      params: {
+        instrument_name: 'BTC-PERPETUAL',
+        count:           1000,
+        include_old:     true
+      }
+    };
 
-    // Filter only liquidation trades
+    // POST to Deribit
+    const rpc = await fetch(
+      'https://www.deribit.com/api/v2/public/get_last_trades_by_instrument',
+      {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload)
+      }
+    );
+    if (!rpc.ok) throw new Error(`Deribit HTTP ${rpc.status}`);
+    const jr     = await rpc.json();
+    const trades = jr.result?.trades;
+    if (!Array.isArray(trades)) throw new Error('invalid Deribit response');
+
+    // filter liquidations
     const liqs = trades.filter(t => t.trade_type === 'liquidation');
 
-    // Aggregate USD volume for each window
+    // aggregate for each window
     const dataCVal = {};
     for (const [label, span] of Object.entries(windows)) {
       const cutoff = now - span;
       let long = 0, short = 0;
       for (const t of liqs) {
         if (t.timestamp < cutoff) continue;
-        // BTC-PERP contract = $1 per contract
+        // each BTC-PERP contract == $1
         const usd = t.price * t.amount;
         if (t.direction === 'sell')  long  += usd;
         else if (t.direction === 'buy') short += usd;
