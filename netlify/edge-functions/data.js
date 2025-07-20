@@ -117,64 +117,58 @@ export default async (request) => {
     result.errors.push(`B: ${e.message}`);
   }
 
-  // ─── BLOCK C: Liquidations via Deribit JSON-RPC ─────────────────────────
+  // ─── BLOCK C: Liquidations via Deribit time‐filtered JSON‐RPC ─────────────
   try {
-    const now     = Date.now();
+    const now = Date.now();
     const windows = {
       '1h':  1  * 60 * 60 * 1000,
       '4h':  4  * 60 * 60 * 1000,
       '24h': 24 * 60 * 60 * 1000,
     };
 
-    // build JSON-RPC payload
-    const payload = {
-      jsonrpc: '2.0',
-      id:      1,
-      method:  'public/get_last_trades_by_instrument',
-      params: {
-        instrument_name: 'BTC-PERPETUAL',
-        count:           1000,
-        include_old:     true
-      }
-    };
-
-    // POST to Deribit
-    const rpc = await fetch(
-      'https://www.deribit.com/api/v2/public/get_last_trades_by_instrument',
-      {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(payload)
-      }
-    );
-    if (!rpc.ok) throw new Error(`Deribit HTTP ${rpc.status}`);
-    const jr     = await rpc.json();
-    const trades = jr.result?.trades;
-    if (!Array.isArray(trades)) throw new Error('invalid Deribit response');
-
-    // filter liquidations
-    const liqs = trades.filter(t => t.trade_type === 'liquidation');
-
-    // aggregate for each window
-    const dataCVal = {};
+    const dataC = {};
     for (const [label, span] of Object.entries(windows)) {
-      const cutoff = now - span;
+      const payload = {
+        jsonrpc: '2.0',
+        id:      1,
+        method:  'public/get_last_trades_by_instrument_and_time',
+        params: {
+          instrument_name: 'BTC-PERPETUAL',
+          start_timestamp: now - span,
+          end_timestamp:   now,
+          count:           1000,
+          include_old:     false
+        }
+      };
+
+      const rpc = await fetch(
+        'https://www.deribit.com/api/v2/public/get_last_trades_by_instrument_and_time',
+        {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(payload)
+        }
+      );
+      if (!rpc.ok) throw new Error(`Deribit HTTP ${rpc.status}`);
+      const jr     = await rpc.json();
+      const trades = jr.result?.trades;
+      if (!Array.isArray(trades)) throw new Error('invalid Deribit response');
+
       let long = 0, short = 0;
-      for (const t of liqs) {
-        if (t.timestamp < cutoff) continue;
-        // each BTC-PERP contract == $1
-        const usd = t.price * t.amount;
+      for (const t of trades) {
+        if (t.trade_type !== 'liquidation') continue;
+        const usd = t.price * t.amount;  // $1 per contract
         if (t.direction === 'sell')  long  += usd;
         else if (t.direction === 'buy') short += usd;
       }
-      dataCVal[label] = {
+
+      dataC[label] = {
         long:  +long.toFixed(2),
         short: +short.toFixed(2),
-        total: +((long + short).toFixed(2)),
+        total: +((long + short).toFixed(2))
       };
     }
-
-    result.dataC = dataCVal;
+    result.dataC = dataC;
   } catch (e) {
     result.errors.push(`C: ${e.message}`);
   }
