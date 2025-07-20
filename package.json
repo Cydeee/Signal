@@ -2,7 +2,4 @@
   "name": "netlify-data-fetcher",
   "version": "1.0.0",
   "description": "Fetch crypto data blocks for Netlify Functions",
-  "devDependencies": {
-    "puppeteer": "^23.0.0"
-  }
 }
