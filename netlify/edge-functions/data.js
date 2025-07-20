@@ -120,7 +120,7 @@ export default async (request) => {
   // ─── BLOCK C: Liquidations via pre-fetched JSON ───────────────────────────
   try {
     // build a URL to /liquidation-data.json on the same host that invoked this Edge Function
-    const dataUrl = new URL('/liquidation-data.json', request.url).toString();
+    const dataUrl = new URL('/public/liquidation-data.json', request.url).toString();
     const resp    = await fetch(dataUrl);
 
     if (!resp.ok) {
