@@ -39,60 +39,125 @@ export default async (_request) => {
     result.dataB={fundingZ:z,oiDelta24h:pct24h};
   }catch(e){result.errors.push(`B: ${e.message}`);}
 
-  /* ────────────────────────── BLOCK C (Bybit liquidations) ──────────── */
-  try{
-    /**
-     * Bybit v5 public REST:  /v5/market/liquidation
-     *   – category = linear  (USDT-margined perps)
-     *   – symbol   = e.g. BTCUSDT
-     *   – limit    ≤ 1000
-     * Docs & press release: Bybit made the entire liquidation tape public in Feb-2025 :contentReference[oaicite:0]{index=0}
-     */
-    async function sumWindow(hrs){
-      const cutoff=Date.now()-hrs*3_600_000;
-      let longUsd=0,shortUsd=0,cursor='';
-      while(true){
-        const url=new URL('https://api.bybit.com/v5/market/liquidation');
-        url.searchParams.set('category','linear');
-        url.searchParams.set('symbol',SYMBOL);
-        url.searchParams.set('limit','1000');
-        if(cursor) url.searchParams.set('cursor',cursor);
-        const j=await fetch(url).then(r=>r.json());
-        if(j.retCode!==0) throw new Error(`Bybit retCode ${j.retCode}`);
-        const rows=j.result.list;
-        if(!rows||rows.length===0) break;
-        for(const r of rows){
-          const ts=+r.updatedTime;
-          if(ts<cutoff) return {longUsd,shortUsd};
-          const usd=+r.qty*+r.price;
-          // Bybit uses side BUY = shorts liquidated, SELL = longs liquidated
-          r.side==='Sell'? longUsd+=usd : shortUsd+=usd;
-        }
-        if(!j.result.nextPageCursor) break;
-        cursor=j.result.nextPageCursor;
+  /* ─────────────── BLOCK C : Liquidations (Bybit → OKX fallback) ───────────── */
+try {
+  const windows = { '1h': 1, '4h': 4, '24h': 24 };
+  const dataC   = {};
+
+  /* helper to fetch and parse JSON safely with basic retry */
+  async function safeJson(url, tries = 3) {
+    for (let i = 0; i < tries; i++) {
+      const res   = await fetch(url, { headers: { Accept: 'application/json' } });
+      const ct    = res.headers.get('content-type') || '';
+      const text  = await res.text();
+
+      if (!ct.includes('application/json')) {
+        // HTML, Cloudflare, etc.
+        await new Promise(r => setTimeout(r, 500));  // short back-off
+        continue;
       }
-      return {longUsd,shortUsd};
-    }
 
-    // compute liquidation totals for three windows
-    const windows={'1h':1,'4h':4,'24h':24};
-    for(const [lbl,hrs] of Object.entries(windows)){
-      const {longUsd,shortUsd}=await sumWindow(hrs);
-      result.dataC[lbl]={long:+longUsd.toFixed(2),short:+shortUsd.toFixed(2),total:+(longUsd+shortUsd).toFixed(2)};
+      try { return JSON.parse(text); }               // ✓ success
+      catch { /* malformed JSON, retry */ }
     }
-
-    /* add a simple relativity tag: compare 1 h value to its 24 h average */
-    const base=Math.max(result.dataC['24h'].total/24,1); // avoid /0
-    const ratio=result.dataC['1h'].total/base;
-    let level='normal';
-    if(ratio>2) level='very high';
-    else if(ratio>1.2) level='high';
-    else if(ratio<0.5) level='low';
-    result.dataC.relative24h=level;            // e.g. "high", "low", "normal"
-  }catch(e){
-    result.errors.push(`C: ${e.message}`);
-    result.dataC={};
+    throw new Error('invalid JSON after retries');
   }
+
+  /* ---------- primary source: Bybit ---------- */
+  async function bybitTotals(hrs) {
+    const cutoff = Date.now() - hrs * 3_600_000;
+    let longUsd = 0, shortUsd = 0, cursor = '';
+
+    while (true) {
+      const url = new URL('https://api.bybit.com/v5/market/liquidation');
+      url.searchParams.set('category', 'linear');
+      url.searchParams.set('symbol',   SYMBOL);
+      url.searchParams.set('limit',    '1000');
+      if (cursor) url.searchParams.set('cursor', cursor);
+
+      const j = await safeJson(url);
+      if (j.retCode !== 0) throw new Error(`Bybit retCode ${j.retCode}`);
+
+      const rows = j.result?.list ?? [];
+      if (rows.length === 0) break;
+
+      for (const r of rows) {
+        const ts   = +r.updatedTime;
+        if (ts < cutoff) return { longUsd, shortUsd };
+        const usd  = +r.qty * +r.price;
+        r.side === 'Sell' ? (longUsd += usd) : (shortUsd += usd);
+      }
+      cursor = j.result.nextPageCursor;
+      if (!cursor) break;
+    }
+    return { longUsd, shortUsd };
+  }
+
+  /* ---------- secondary source: OKX ---------- */
+  async function okxTotals(hrs) {
+    const since  = Date.now() - hrs * 3_600_000;
+    let longUsd  = 0, shortUsd = 0, before = '';
+
+    while (true) {
+      const url = new URL('https://www.okx.com/api/v5/public/liquidation-orders');
+      url.searchParams.set('instType', 'SWAP');
+      url.searchParams.set('uly',      SYMBOL.replace('USDT', ''));
+      url.searchParams.set('limit',    '100');      // max page
+      if (before) url.searchParams.set('before', before);
+
+      const j = await safeJson(url);
+      if (j.code !== '0') throw new Error(`OKX code ${j.code}`);
+
+      const rows = j.data ?? [];
+      if (rows.length === 0) break;
+
+      for (const r of rows) {
+        const ts  = +r.ts;
+        if (ts < since) return { longUsd, shortUsd };
+        const usd = +r.sz * +r.px;
+        r.side === 'sell' ? (longUsd += usd) : (shortUsd += usd);
+      }
+      before = rows.at(-1).ts;
+      if (rows.length < 100) break;
+    }
+    return { longUsd, shortUsd };
+  }
+
+  /* ---------- build the three windows ---------- */
+  let useOkx = false;
+  for (const [lbl, hrs] of Object.entries(windows)) {
+    let longUsd = 0, shortUsd = 0;
+
+    try {
+      ({ longUsd, shortUsd } = await bybitTotals(hrs));
+    } catch {
+      // any Bybit error -> switch to OKX for this and the remaining windows
+      useOkx = true;
+    }
+    if (useOkx) ({ longUsd, shortUsd } = await okxTotals(hrs));
+
+    dataC[lbl] = {
+      long:  +longUsd.toFixed(2),
+      short: +shortUsd.toFixed(2),
+      total: +(longUsd + shortUsd).toFixed(2)
+    };
+  }
+
+  /* ---------- add relative intensity tag ---------- */
+  const base   = Math.max(dataC['24h'].total / 24, 1);
+  const ratio  = dataC['1h'].total / base;
+  let level    = 'normal';
+  if (ratio > 2)      level = 'very high';
+  else if (ratio > 1) level = 'high';
+  else if (ratio < .5) level = 'low';
+
+  dataC.relative24h = level + (useOkx ? ' · OKX' : ' · Bybit');
+
+  result.dataC = dataC;
+} catch (e) {
+  result.errors.push(`C: ${e.message}`);
+  result.dataC = {};
+}
 
   /* ────────────────────────── BLOCK D (sentiment) ──────────────────── */
   try{
