@@ -7,7 +7,7 @@ export default async (request) => {
   const result = {
     dataA: {},
     dataB: null,
-    dataC: null,    // ← added
+    dataC: null,     // ← added Block C placeholder
     dataD: null,
     dataE: null,
     errors: []
@@ -117,31 +117,47 @@ export default async (request) => {
     result.errors.push(`B: ${e.message}`);
   }
 
-  // ─── BLOCK C: Liquidations via pre-fetched JSON (15m, 1h, 4h, 24h) ───────
+  // ─── BLOCK C: Liquidations via Deribit public API ─────────────────────────
   try {
-    // Note the leading /public/ so it matches your published path
-    const dataUrl = new URL('/public/liquidation-data.json', request.url).toString();
-    const resp    = await fetch(dataUrl);
+    const now     = Date.now();
+    const windows = {
+      '1h':  1  * 60 * 60 * 1000,
+      '4h':  4  * 60 * 60 * 1000,
+      '24h': 24 * 60 * 60 * 1000,
+    };
 
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status} fetching ${dataUrl}`);
+    // Fetch last 1000 trades on BTC-PERPETUAL
+    const resp  = await fetch(
+      'https://www.deribit.com/api/v2/public/get_last_trades_by_instrument' +
+      '?instrument_name=BTC-PERPETUAL&count=1000&include_old=true'
+    );
+    if (!resp.ok) throw new Error(`Deribit HTTP ${resp.status}`);
+    const js     = await resp.json();
+    const trades = js.result.trades;
+
+    // Filter only liquidation trades
+    const liqs = trades.filter(t => t.trade_type === 'liquidation');
+
+    // Aggregate USD volume for each window
+    const dataCVal = {};
+    for (const [label, span] of Object.entries(windows)) {
+      const cutoff = now - span;
+      let long = 0, short = 0;
+      for (const t of liqs) {
+        if (t.timestamp < cutoff) continue;
+        // BTC-PERP contract = $1 per contract
+        const usd = t.price * t.amount;
+        if (t.direction === 'sell')  long  += usd;
+        else if (t.direction === 'buy') short += usd;
+      }
+      dataCVal[label] = {
+        long:  +long.toFixed(2),
+        short: +short.toFixed(2),
+        total: +((long + short).toFixed(2)),
+      };
     }
 
-    // JSON must be:
-    // {
-    //   "15m": { long: …, short: …, total: … },
-    //   "1h":  { … },
-    //   "4h":  { … },
-    //   "24h": { … }
-    // }
-    const snapshot = await resp.json();
-
-    result.dataC = {
-      '15m': snapshot['15m'],
-      '1h':  snapshot['1h'],
-      '4h':  snapshot['4h'],
-      '24h': snapshot['24h']
-    };
+    result.dataC = dataCVal;
   } catch (e) {
     result.errors.push(`C: ${e.message}`);
   }
