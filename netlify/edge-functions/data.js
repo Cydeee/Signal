@@ -117,21 +117,27 @@ export default async (request) => {
     result.errors.push(`B: ${e.message}`);
   }
 
-  // ─── BLOCK C: Binance liquidation via allForceOrders ────────────────
+  // ─── BLOCK C: Binance allForceOrders ──────────────────────────
   try {
     const now     = Date.now();
     const windows = { '1h': 1, '4h': 4, '24h': 24 };
     const dataC   = {};
 
     for (const [lbl, hrs] of Object.entries(windows)) {
-      const startTs = now - hrs * 3600_000;
+      const startTs = now - hrs * 3600000;
       const url     = new URL('https://fapi.binance.com/fapi/v1/allForceOrders');
       url.searchParams.set('symbol', SYMBOL);
       url.searchParams.set('startTime', startTs);
       url.searchParams.set('endTime',   now);
 
-      const res    = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // IMPORTANT: use url.href, not url object
+      const res    = await fetch(url.href);
+      if (!res.ok) {
+        result.errors.push(`C[${lbl}]: HTTP ${res.status}`);
+        dataC[lbl] = { long: 0, short: 0, total: 0 };
+        continue;
+      }
+
       const orders = await res.json();
 
       let long = 0, short = 0;
@@ -151,7 +157,21 @@ export default async (request) => {
     result.dataC = dataC;
   } catch (e) {
     result.errors.push(`C: ${e.message}`);
+    result.dataC = {};  // ensure it's never null
   }
+
+  // ─── BLOCK D: Sentiment ────────────────────────────────────────
+  // ... [unchanged] ...
+
+  // ─── BLOCK E: Macro Risk Context ──────────────────────────────
+  // ... [unchanged] ...
+
+  // ─── Return JSON ──────────────────────────────────────────────
+  return new Response(
+    JSON.stringify({ ...result, timestamp: Date.now() }),
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+};
 
   // ─── BLOCK D: Sentiment ───────────────────────────────────────────────
   try {
