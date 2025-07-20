@@ -1,3 +1,5 @@
+# .github/workflows/scrape-liquidation.yml
+
 name: Scrape CoinGlass Liquidations
 
 on:
@@ -20,7 +22,7 @@ jobs:
           node-version: '18'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Run scraper
         run: npm run scrape:liquidation
