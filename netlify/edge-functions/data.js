@@ -7,7 +7,7 @@ export default async (request) => {
   const result = {
     dataA: {},
     dataB: null,
-    dataC: null,
+    dataC: {},        // initialized to empty object
     dataD: null,
     dataE: null,
     errors: []
@@ -117,20 +117,19 @@ export default async (request) => {
     result.errors.push(`B: ${e.message}`);
   }
 
-  // ─── BLOCK C: Binance allForceOrders ──────────────────────────
+  // ─── BLOCK C: Binance allForceOrders ────────────────────────────────
   try {
     const now     = Date.now();
     const windows = { '1h': 1, '4h': 4, '24h': 24 };
     const dataC   = {};
 
     for (const [lbl, hrs] of Object.entries(windows)) {
-      const startTs = now - hrs * 3600000;
+      const startTs = now - hrs * 3600_000;
       const url     = new URL('https://fapi.binance.com/fapi/v1/allForceOrders');
       url.searchParams.set('symbol', SYMBOL);
       url.searchParams.set('startTime', startTs);
       url.searchParams.set('endTime',   now);
 
-      // IMPORTANT: use url.href, not url object
       const res    = await fetch(url.href);
       if (!res.ok) {
         result.errors.push(`C[${lbl}]: HTTP ${res.status}`);
@@ -157,23 +156,10 @@ export default async (request) => {
     result.dataC = dataC;
   } catch (e) {
     result.errors.push(`C: ${e.message}`);
-    result.dataC = {};  // ensure it's never null
+    result.dataC = {};
   }
 
-  // ─── BLOCK D: Sentiment ────────────────────────────────────────
-  // ... [unchanged] ...
-
-  // ─── BLOCK E: Macro Risk Context ──────────────────────────────
-  // ... [unchanged] ...
-
-  // ─── Return JSON ──────────────────────────────────────────────
-  return new Response(
-    JSON.stringify({ ...result, timestamp: Date.now() }),
-    { headers: { 'Content-Type': 'application/json' } }
-  );
-};
-
-  // ─── BLOCK D: Sentiment ───────────────────────────────────────────────
+  // ─── BLOCK D: Sentiment ──────────────────────────────────────────────
   try {
     const cg = await fetch(
       'https://api.coingecko.com/api/v3/coins/bitcoin'
@@ -197,7 +183,7 @@ export default async (request) => {
     result.errors.push(`D: ${e.message}`);
   }
 
-  // ─── BLOCK E: Macro Risk Context ───────────────────────────────────────
+  // ─── BLOCK E: Macro Risk Context ─────────────────────────────────────
   try {
     const gv = await fetch('https://api.coingecko.com/api/v3/global')
       .then(r => r.json());
@@ -214,7 +200,7 @@ export default async (request) => {
     result.errors.push(`E: ${e.message}`);
   }
 
-  // ─── Return JSON ───────────────────────────────────────────────────────
+  // ─── Return JSON ────────────────────────────────────────────────────────
   return new Response(
     JSON.stringify({ ...result, timestamp: Date.now() }),
     { headers: { 'Content-Type': 'application/json' } }
