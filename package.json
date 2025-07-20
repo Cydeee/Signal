@@ -1,0 +1,10 @@
+{
+  "name": "signal-scraper",
+  "version": "1.0.0",
+  "scripts": {
+    "scrape:liquidation": "node Signal/scripts/scrape-liquidations.js"
+  },
+  "dependencies": {
+    "puppeteer": "^23.0.0"
+  }
+}
