@@ -1,6 +1,6 @@
 // netlify/edge-functions/data.js
 export default async (request) => {
-  /* ────────────────  CORS pre-flight  ──────────────── */
+  /* ───────────────  CORS pre-flight  ─────────────── */
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
@@ -21,7 +21,7 @@ export default async (request) => {
     errors: []
   };
 
-  /* ───────── resilient fetch helper ───────── */
+  /* ───────── resilient JSON fetch ───────── */
   async function safeJson(url, retries = 3) {
     for (let i = 0; i < retries; i++) {
       const res = await fetch(url, {
@@ -37,20 +37,19 @@ export default async (request) => {
       let obj;
       try { obj = await res.json(); } catch { await new Promise(r=>setTimeout(r,400)); continue; }
 
-      // Retry if Binance error JSON (code < 0)
       if (obj && typeof obj.code === 'number' && obj.code < 0) { await new Promise(r=>setTimeout(r,400)); continue; }
-      return obj;                                      // ✅ good JSON
+      return obj;                                    // ✅ good JSON
     }
     throw new Error('invalid JSON after retries');
   }
 
-  /* ───────── indicator helpers (unchanged) ───────── */
-  const sma=(a,p)=>a.slice(-p).reduce((s,x)=>s+x,0)/p;
-  const std=(a,p)=>{const s=a.slice(-p),m=sma(s,p);return Math.sqrt(s.reduce((t,x)=>t+(x-m)**2,0)/p);};
-  const ema=(a,p)=>{if(a.length<p)return 0;const k=2/(p+1);let e=sma(a.slice(0,p),p);for(let i=p;i<a.length;i++)e=a[i]*k+e*(1-k);return e;};
+  /* ───────── indicator helpers ───────── */
+  const sma = (a,p)=>a.slice(-p).reduce((s,x)=>s+x,0)/p;
+  const std = (a,p)=>{const s=a.slice(-p),m=sma(s,p);return Math.sqrt(s.reduce((t,x)=>t+(x-m)**2,0)/p);};
+  const ema = (a,p)=>{if(a.length<p)return 0;const k=2/(p+1);let e=sma(a.slice(0,p),p);for(let i=p;i<a.length;i++)e=a[i]*k+e*(1-k);return e;};
   function rsi(a,p){if(a.length<p+1)return 0;let g=0,l=0;for(let i=1;i<=p;i++){const d=a[i]-a[i-1];d>=0?g+=d:l-=d;}let ag=g/p,al=l/p;
     for(let i=p+1;i<a.length;i++){const d=a[i]-a[i-1];ag=(ag*(p-1)+Math.max(d,0))/p;al=(al*(p-1)+Math.max(-d,0))/p;}return al===0?100:100-100/(1+ag/al);}
-  const atr = (h, l, c, p) => {
+  const atr = (h,l,c,p) => {
     if (h.length < p + 1) return 0;
     const trs = [];
     for (let i = 1; i < h.length; i++) {
@@ -77,11 +76,11 @@ export default async (request) => {
             last=c.at(-1)||1;
 
       result.dataA[tf] = {
-        ema50:  +ema(c, 50 ).toFixed(2),
-        ema200: +ema(c, 200).toFixed(2),
-        rsi14:  +rsi(c, 14 ).toFixed(1),
-        bbPct:  +((4 * std(c, 20) / last) * 100).toFixed(2),
-        atrPct: +((atr(h, l, c, 14) / last) * 100).toFixed(2)
+        ema50:+ema(c,50).toFixed(2),
+        ema200:+ema(c,200).toFixed(2),
+        rsi14:+rsi(c,14).toFixed(1),
+        bbPct:+((4*std(c,20)/last)*100).toFixed(2),
+        atrPct:+((atr(h,l,c,14)/last)*100).toFixed(2)
       };
     } catch (e) { result.errors.push(`A[${tf}]: ${e.message}`); }
   }
@@ -92,12 +91,12 @@ export default async (request) => {
       const rows = await safeJson(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=${tf}&limit=5`);
       if (!Array.isArray(rows) || rows.length < 5) throw new Error(`klines[${tf}]`);
 
-      const closes=rows.map(r=>+r[4]);
-      const pct=((closes.at(-1)-closes[0])/closes[0])*100;
+      const closes = rows.map(r=>+r[4]);
+      const pct = ((closes.at(-1) - closes[0]) / closes[0]) * 100;
 
       let note;
-      if      (pct >=  1.5) note='🔼 strong up-move – breakout long / exit shorts';
-      else if (pct >=  0.5) note='⬆ bullish drift – long bias';
+      if      (pct >= 1.5)  note='🔼 strong up-move – breakout long / exit shorts';
+      else if (pct >= 0.5)  note='⬆ bullish drift – long bias';
       else if (pct <= -1.5) note='🔽 strong down-move – breakout short / exit longs';
       else if (pct <= -0.5) note='⬇ bearish drift – short bias';
       else                  note = closes.at(-1) > closes.at(-2)
@@ -117,16 +116,16 @@ export default async (request) => {
     const win={'15m':0.25,'1h':1,'4h':4,'24h':24};
 
     for (const [lbl,hrs] of Object.entries(win)) {
-      const cut = now - hrs*3_600_000;
+      const cut= now - hrs*3_600_000;
       let bull=0,bear=0;
       for (const k of rows) {
         if (+k[0] < cut) continue;
         (+k[4] >= +k[1] ? bull : bear) += +k[5];
       }
       result.dataC[lbl] = {
-        bullVol:  +bull.toFixed(2),
-        bearVol:  +bear.toFixed(2),
-        totalVol: +(bull+bear).toFixed(2)
+        bullVol:+bull.toFixed(2),
+        bearVol:+bear.toFixed(2),
+        totalVol:+(bull+bear).toFixed(2)
       };
     }
     const tot24=result.dataC['24h'].totalVol;
@@ -138,7 +137,7 @@ export default async (request) => {
     }
   } catch (e) { result.errors.push(`C: ${e.message}`); result.dataC={}; }
 
-  /* ───────── BLOC D – derivatives positioning (unchanged) ───────── */
+  /* ───────── BLOC D – derivatives positioning ───────── */
   try {
     const fr = await safeJson(`https://fapi.binance.com/fapi/v1/fundingRate?symbol=${SYMBOL}&limit=1000`);
     if (!Array.isArray(fr)) throw new Error('fundingRate not array');
@@ -181,7 +180,7 @@ export default async (request) => {
     };
   } catch (e) { result.errors.push(`F: ${e.message}`); }
 
-  /* ───────── JSON response with CORS headers ───────── */
+  /* ───────── return JSON with CORS ───────── */
   return new Response(
     JSON.stringify({ ...result, timestamp: Date.now() }),
     {
