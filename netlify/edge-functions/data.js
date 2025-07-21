@@ -1,6 +1,6 @@
 // netlify/edge-functions/data.js
 export default async (request) => {
-  /* ───────────────  CORS pre-flight  ─────────────── */
+  /* ──────────────  CORS pre-flight  ────────────── */
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
@@ -13,7 +13,7 @@ export default async (request) => {
   }
 
   const SYMBOL = 'BTCUSDT';
-  const LIMIT  = 250;                 // klines per tf for bloc A
+  const LIMIT  = 250;                       // rows for bloc A
 
   const result = {
     dataA: {}, dataB: {}, dataC: {},
@@ -32,13 +32,13 @@ export default async (request) => {
       });
 
       const ct = res.headers.get('content-type') || '';
-      if (!ct.includes('application/json')) { await new Promise(r=>setTimeout(r,400)); continue; }
+      if (!ct.includes('application/json')) { await new Promise(r => setTimeout(r, 400)); continue; }
 
       let obj;
-      try { obj = await res.json(); } catch { await new Promise(r=>setTimeout(r,400)); continue; }
+      try { obj = await res.json(); } catch { await new Promise(r => setTimeout(r, 400)); continue; }
 
-      if (obj && typeof obj.code === 'number' && obj.code < 0) { await new Promise(r=>setTimeout(r,400)); continue; }
-      return obj;                                    // ✅ good JSON
+      if (obj && typeof obj.code === 'number' && obj.code < 0) { await new Promise(r => setTimeout(r, 400)); continue; }
+      return obj;            // ✅ good JSON
     }
     throw new Error('invalid JSON after retries');
   }
@@ -70,10 +70,10 @@ export default async (request) => {
       const rows = await safeJson(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=${tf}&limit=${LIMIT}`);
       if (!Array.isArray(rows)) throw new Error('klines not array');
 
-      const c=rows.map(r=>+r[4]),
-            h=rows.map(r=>+r[2]),
-            l=rows.map(r=>+r[3]),
-            last=c.at(-1)||1;
+      const c = rows.map(r=>+r[4]),
+            h = rows.map(r=>+r[2]),
+            l = rows.map(r=>+r[3]),
+            last = c.at(-1) || 1;
 
       result.dataA[tf] = {
         ema50:+ema(c,50).toFixed(2),
@@ -92,13 +92,13 @@ export default async (request) => {
       if (!Array.isArray(rows) || rows.length < 5) throw new Error(`klines[${tf}]`);
 
       const closes = rows.map(r=>+r[4]);
-      const pct = ((closes.at(-1) - closes[0]) / closes[0]) * 100;
+      const pct    = ((closes.at(-1) - closes[0]) / closes[0]) * 100;
 
       let note;
-      if      (pct >= 1.5)  note='🔼 strong up-move – breakout long / exit shorts';
-      else if (pct >= 0.5)  note='⬆ bullish drift – long bias';
-      else if (pct <= -1.5) note='🔽 strong down-move – breakout short / exit longs';
-      else if (pct <= -0.5) note='⬇ bearish drift – short bias';
+      if      (pct >=  1.5) note = '🔼 strong up-move – breakout long / exit shorts';
+      else if (pct >=  0.5) note = '⬆ bullish drift – long bias';
+      else if (pct <= -1.5) note = '🔽 strong down-move – breakout short / exit longs';
+      else if (pct <= -0.5) note = '⬇ bearish drift – short bias';
       else                  note = closes.at(-1) > closes.at(-2)
                                    ? '↗ range base – possible long reversal'
                                    : '↘ range top – possible short reversal';
@@ -112,12 +112,12 @@ export default async (request) => {
     const rows = await safeJson(`https://api.binance.com/api/v3/klines?symbol=${SYMBOL}&interval=1m&limit=1500`);
     if (!Array.isArray(rows)) throw new Error('1m klines not array');
 
-    const now=Date.now();
-    const win={'15m':0.25,'1h':1,'4h':4,'24h':24};
+    const now = Date.now();
+    const win = { '15m':0.25, '1h':1, '4h':4, '24h':24 };
 
-    for (const [lbl,hrs] of Object.entries(win)) {
-      const cut= now - hrs*3_600_000;
-      let bull=0,bear=0;
+    for (const [lbl, hrs] of Object.entries(win)) {
+      const cut = now - hrs * 3_600_000;
+      let bull = 0, bear = 0;
       for (const k of rows) {
         if (+k[0] < cut) continue;
         (+k[4] >= +k[1] ? bull : bear) += +k[5];
@@ -128,12 +128,15 @@ export default async (request) => {
         totalVol:+(bull+bear).toFixed(2)
       };
     }
-    const tot24=result.dataC['24h'].totalVol;
-    const base={'15m':tot24/96,'1h':tot24/24,'4h':tot24/6};
-    result.dataC.relative={};
+    const tot24 = result.dataC['24h'].totalVol;
+    const base  = { '15m': tot24/96, '1h': tot24/24, '4h': tot24/6 };
+    result.dataC.relative = {};
     for (const lbl of ['15m','1h','4h']) {
-      const r=result.dataC[lbl].totalVol/Math.max(base[lbl],1);
-      result.dataC.relative[lbl]=r>2?'very high':r>1.2?'high':r<0.5?'low':'normal';
+      const r = result.dataC[lbl].totalVol / Math.max(base[lbl], 1);
+      result.dataC.relative[lbl] = r>2 ? 'very high'
+                               : r>1.2 ? 'high'
+                               : r<0.5 ? 'low'
+                               : 'normal';
     }
   } catch (e) { result.errors.push(`C: ${e.message}`); result.dataC={}; }
 
@@ -142,7 +145,7 @@ export default async (request) => {
     const fr = await safeJson(`https://fapi.binance.com/fapi/v1/fundingRate?symbol=${SYMBOL}&limit=1000`);
     if (!Array.isArray(fr)) throw new Error('fundingRate not array');
 
-    const arr  = fr.slice(-42).map(d => +d.fundingRate);
+    const arr  = fr.slice(-42).map(d=>+d.fundingRate);
     const mean = sma(arr, arr.length);
     const sd   = Math.sqrt(arr.reduce((t,x)=>t+(x-mean)**2,0)/arr.length);
     const z    = sd ? ((arr.at(-1) - mean) / sd).toFixed(2) : '0.00';
@@ -157,8 +160,8 @@ export default async (request) => {
 
   /* ───────── BLOC E – sentiment ───────── */
   try {
-    const cg = await fetch('https://api.coingecko.com/api/v3/coins/bitcoin').then(r=>r.json());
-    const up = cg.sentiment_votes_up_percentage ?? cg.community_data?.sentiment_votes_up_percentage;
+    const cg  = await fetch('https://api.coingecko.com/api/v3/coins/bitcoin').then(r=>r.json());
+    const up  = cg.sentiment_votes_up_percentage ?? cg.community_data?.sentiment_votes_up_percentage;
     if (up == null) throw new Error('sentiment missing');
 
     const fg  = await fetch('https://api.alternative.me/fng/?limit=1').then(r=>r.json());
@@ -180,7 +183,7 @@ export default async (request) => {
     };
   } catch (e) { result.errors.push(`F: ${e.message}`); }
 
-  /* ───────── return JSON with CORS ───────── */
+  /* ───────── JSON response with CORS ───────── */
   return new Response(
     JSON.stringify({ ...result, timestamp: Date.now() }),
     {
